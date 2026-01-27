@@ -39,15 +39,25 @@ export async function POST(req: Request) {
 
     const claveNormalizada = normalizeClave(clave);
 
-    const { data, error } = await supabase
-      .from("clientes")
-      .select("id, dni, clave")
-      .eq("dni", dni)
-      .single();
+    const dniClean = String(dni).replace(/\D/g, "");
 
-    if (error || !data) {
-      return NextResponse.json({ error: "Cliente no encontrado" }, { status: 401 });
-    }
+const { data, error } = await supabase
+  .from("clientes")
+  .select("id, dni, clave")
+  .eq("dni", dniClean)
+  .maybeSingle();
+
+if (error) {
+  return NextResponse.json(
+    { error: `Error Supabase: ${error.message}` },
+    { status: 500 }
+  );
+}
+
+if (!data) {
+  return NextResponse.json({ error: "Cliente no encontrado" }, { status: 401 });
+}
+
 
     if (data.clave !== claveNormalizada) {
       return NextResponse.json({ error: "Clave incorrecta" }, { status: 401 });
