@@ -20,57 +20,76 @@ export default function NuevoClientePage() {
   const [loading, setLoading] = useState(false);
 
   const guardar = async () => {
-    setErr(null);
-    setOk(null);
+  setErr(null);
+  setOk(null);
 
-    if (!nombre.trim()) return setErr("El nombre es obligatorio.");
-    const nLimite = Number(limite);
-    if (!Number.isFinite(nLimite) || nLimite < 0) return setErr("Límite inválido.");
+  if (!nombre.trim()) return setErr("El nombre es obligatorio.");
 
-    setLoading(true);
-try {
-  const dniClean = dni.trim();
-
-  // 0) validar DNI duplicado
-  if (dniClean) {
-    const { data: exist, error: exErr } = await supabase
-      .from("clientes")
-      .select("id,nombre")
-      .eq("dni", dniClean)
-      .limit(1);
-
-    if (exErr) throw exErr;
-
-    if (exist && exist.length > 0) {
-      setErr(`Ya existe un cliente con DNI ${dniClean}: ${exist[0].nombre}`);
-      setLoading(false);
-      return;
-    }
+  const nLimite = Number(limite);
+  if (!Number.isFinite(nLimite) || nLimite < 0) {
+    return setErr("Límite inválido.");
   }
 
-  // 1) crear cliente
-  const { data: cliente, error: cErr } = await supabase
-    .from("clientes")
-    .insert({
-      nombre: nombre.trim(),
-      dni: dniClean || null,
-      telefono: telefono.trim() || null,
-      direccion: direccion.trim() || null,
-    })
-    .select("id")
-    .single();
+  setLoading(true);
 
-  if (cErr) throw cErr;
+  try {
+    const dniClean = dni.trim();
 
-      setOk("✅ Cliente creado y límite asignado.");
-      // Ir al detalle del cliente
-      router.push(`/clientes/${cliente.id}`);
-    } catch (e: any) {
-      setErr(e?.message ?? String(e));
-    } finally {
-      setLoading(false);
+    // 0) validar DNI duplicado
+    if (dniClean) {
+      const { data: exist, error: exErr } = await supabase
+        .from("clientes")
+        .select("id,nombre")
+        .eq("dni", dniClean)
+        .limit(1);
+
+      if (exErr) throw exErr;
+
+      if (exist && exist.length > 0) {
+        setErr(`Ya existe un cliente con DNI ${dniClean}: ${exist[0].nombre}`);
+        setLoading(false);
+        return;
+      }
     }
-  };
+
+    // 1) crear cliente
+    const { data: cliente, error: cErr } = await supabase
+      .from("clientes")
+      .insert({
+        nombre: nombre.trim(),
+        dni: dniClean || null,
+        telefono: telefono.trim() || null,
+        direccion: direccion.trim() || null,
+        estado, // 👈 guardamos también el estado
+      })
+      .select("id")
+      .single();
+
+    if (cErr) throw cErr;
+
+    const clienteId = cliente.id as string;
+
+    // 2) crear / actualizar cuenta de crédito
+    const { error: ccErr } = await supabase
+      .from("cuentas_credito")
+      .upsert(
+        {
+          cliente_id: clienteId,
+          limite_total: nLimite,
+        },
+        { onConflict: "cliente_id" }
+      );
+
+    if (ccErr) throw ccErr;
+
+    setOk("✅ Cliente creado y límite asignado.");
+    router.push(`/clientes/${clienteId}`);
+  } catch (e: any) {
+    setErr(e?.message ?? String(e));
+  } finally {
+    setLoading(false);
+  }
+};
 
   return (
     <main style={{ maxWidth: 850, margin: "30px auto", fontFamily: "system-ui" }}>
