@@ -37,29 +37,32 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Datos incompletos" }, { status: 400 });
     }
 
+    const dniClean = String(dni).replace(/\D/g, "");
     const claveNormalizada = normalizeClave(clave);
 
-    const dniClean = String(dni).replace(/\D/g, "");
+    const { data, error } = await supabase
+      .from("clientes")
+      .select("id, dni, vicred_num")
+      .eq("dni", dniClean)
+      .maybeSingle();
 
-const { data, error } = await supabase
-  .from("clientes")
-  .select("id, dni, clave")
-  .eq("dni", dniClean)
-  .maybeSingle();
+    if (error) {
+      return NextResponse.json(
+        { error: `Error Supabase: ${error.message}` },
+        { status: 500 }
+      );
+    }
 
-if (error) {
-  return NextResponse.json(
-    { error: `Error Supabase: ${error.message}` },
-    { status: 500 }
-  );
-}
+    if (!data) {
+      return NextResponse.json(
+        { error: "Cliente no encontrado" },
+        { status: 401 }
+      );
+    }
 
-if (!data) {
-  return NextResponse.json({ error: "Cliente no encontrado" }, { status: 401 });
-}
+    const claveEsperada = String(data.vicred_num ?? "").padStart(6, "0");
 
-
-    if (data.clave !== claveNormalizada) {
+    if (claveEsperada !== claveNormalizada) {
       return NextResponse.json({ error: "Clave incorrecta" }, { status: 401 });
     }
 
