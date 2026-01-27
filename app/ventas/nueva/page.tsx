@@ -14,6 +14,12 @@ type Estado = {
   bloqueado_por_mora: boolean;
 };
 
+function addDays(iso: string, days: number) {
+  const d = new Date(iso + "T00:00:00");
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
 export default function NuevaVentaPage() {
   const router = useRouter();
 
@@ -23,7 +29,13 @@ export default function NuevaVentaPage() {
 
   const [clienteId, setClienteId] = useState("");
   const [comercioId, setComercioId] = useState<number | "">("");
-  const [fecha, setFecha] = useState(() => new Date().toISOString().slice(0, 10));
+
+  // ✅ Fecha de venta automática (hoy)
+  const [fecha] = useState(() => new Date().toISOString().slice(0, 10));
+
+  // ✅ Primer vencimiento (default +30 días)
+  const [primerVencimiento, setPrimerVencimiento] = useState(() => addDays(new Date().toISOString().slice(0, 10), 30));
+
   const [factura, setFactura] = useState("");
   const [total, setTotal] = useState("");
   const [anticipo, setAnticipo] = useState("0");
@@ -38,6 +50,7 @@ export default function NuevaVentaPage() {
   useEffect(() => {
     (async () => {
       setErr(null);
+
       const { data: c, error: cErr } = await supabase
         .from("clientes")
         .select("id,nombre,dni")
@@ -64,6 +77,10 @@ export default function NuevaVentaPage() {
 
     if (!clienteId) return setErr("Seleccioná un cliente.");
     if (!comercioId) return setErr("Seleccioná un comercio.");
+
+    if (!primerVencimiento) return setErr("Seleccioná el primer vencimiento.");
+    if (primerVencimiento < fecha) return setErr("El primer vencimiento no puede ser anterior a la fecha de venta.");
+
     const nTotal = Number(total);
     const nAnt = Number(anticipo);
     const nCuotas = Number(cuotas);
@@ -87,7 +104,8 @@ export default function NuevaVentaPage() {
       .insert({
         cliente_id: clienteId,
         comercio_id: comercioId,
-        fecha,
+        fecha, // ✅ fecha venta automática
+        primer_vencimiento: primerVencimiento, // ✅ nuevo: desde acá corren cuotas
         factura_numero: factura.trim() || null,
         total: nTotal,
         anticipo: nAnt,
@@ -100,6 +118,7 @@ export default function NuevaVentaPage() {
     if (error) return setErr(error.message);
 
     setMsg("✅ Venta creada. Cuotas generadas automáticamente.");
+
     // refrescar estados
     const { data: e } = await supabase.from("vw_estado_credito").select("*");
     const map: Record<string, Estado> = {};
@@ -156,34 +175,34 @@ export default function NuevaVentaPage() {
         </div>
 
         <div>
-  <label>Fecha</label>
-  <input
-    value={fecha}
-    onChange={(e) => setFecha(e.target.value)}
-    type="date"
-    style={{ width: "100%", padding: 10, marginTop: 6 }}
-  />
-</div>
+          <label>Fecha de venta</label>
+          <input value={fecha} type="date" readOnly style={{ width: "100%", padding: 10, marginTop: 6, opacity: 0.85 }} />
+        </div>
 
-<div>
-  <label>N° Factura</label>
-  <input
-    value={factura}
-    onChange={(e) => setFactura(e.target.value)}
-    placeholder="Ej: A-0001-00001234"
-    style={{ width: "100%", padding: 10, marginTop: 6 }}
-  />
-</div>
+        <div>
+          <label>Primer vencimiento</label>
+          <input
+            value={primerVencimiento}
+            onChange={(e) => setPrimerVencimiento(e.target.value)}
+            type="date"
+            style={{ width: "100%", padding: 10, marginTop: 6 }}
+          />
+        </div>
 
-<div>
-  <label>Cuotas (mensual)</label>
-  <input
-    value={cuotas}
-    onChange={(e) => setCuotas(e.target.value)}
-    inputMode="numeric"
-    style={{ width: "100%", padding: 10, marginTop: 6 }}
-  />
-</div>
+        <div>
+          <label>N° Factura</label>
+          <input
+            value={factura}
+            onChange={(e) => setFactura(e.target.value)}
+            placeholder="Ej: A-0001-00001234"
+            style={{ width: "100%", padding: 10, marginTop: 6 }}
+          />
+        </div>
+
+        <div>
+          <label>Cuotas (mensual)</label>
+          <input value={cuotas} onChange={(e) => setCuotas(e.target.value)} inputMode="numeric" style={{ width: "100%", padding: 10, marginTop: 6 }} />
+        </div>
 
         <div>
           <label>Total</label>
@@ -207,3 +226,4 @@ export default function NuevaVentaPage() {
     </main>
   );
 }
+
