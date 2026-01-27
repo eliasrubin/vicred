@@ -24,7 +24,7 @@ export async function GET() {
     );
   }
 
-  const token = cookies().get("auth")?.value;
+  const token = (await cookies()).get("auth")?.value;
   if (!token) {
     return NextResponse.json({ error: "No autorizado" }, { status: 401 });
   }
