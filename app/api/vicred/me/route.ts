@@ -24,7 +24,10 @@ export async function GET() {
     );
   }
 
-  const token = (await cookies()).get("auth")?.value;
+  // En tu versión de Next, cookies() es async
+  const cookieStore = await cookies();
+  const token = cookieStore.get("auth")?.value;
+
   if (!token) {
     return NextResponse.json({ error: "No autorizado" }, { status: 401 });
   }
@@ -43,19 +46,73 @@ export async function GET() {
 
   const supabase = createClient(url, key);
 
-  const { data: cliente, error } = await supabase
+  // 1) CLIENTE
+  const { data: cliente, error: errCliente } = await supabase
     .from("clientes")
     .select("*")
     .eq("dni", dni)
-    .single();
+    .maybeSingle();
 
-  if (error || !cliente) {
+  if (errCliente) {
+    return NextResponse.json(
+      { error: `Error Supabase (cliente): ${errCliente.message}` },
+      { status: 500 }
+    );
+  }
+
+  if (!cliente) {
     return NextResponse.json({ error: "No autorizado" }, { status: 401 });
   }
 
+  // 2) CUOTAS (según tus columnas reales)
+  const { data: cuotasRaw, error: errCuotas } = await supabase
+    .from("cuotas")
+    .select("id, nro, vencimiento, importe, estado, pagado")
+    .eq("cliente_id", cliente.id)
+    .order("vencimiento", { ascending: true });
+
+  if (errCuotas) {
+    return NextResponse.json(
+      { error: `Error Supabase (cuotas): ${errCuotas.message}` },
+      { status: 500 }
+    );
+  }
+
+  // Pendientes = estado distinto de PAGADA
+  const cuotasPendientes = (cuotasRaw || []).filter(
+    (c) => String(c.estado || "").toUpperCase() !== "PAGADA"
+  );
+
+  const totalPendiente = cuotasPendientes.reduce(
+    (acc, c) => acc + Number(c.importe || 0),
+    0
+  );
+
+  const totalPagado = (cuotasRaw || []).reduce(
+    (acc, c) => acc + Number(c.pagado || 0),
+    0
+  );
+
+  const proximaVenc = cuotasPendientes.length
+    ? cuotasPendientes[0].vencimiento
+    : null;
+
+  // 3) RESPUESTA para tu panel (mantengo nombres esperados)
   return NextResponse.json({
     cliente,
-    estado: {},
-    cuotas: [],
+    estado: {
+      total_pagado: totalPagado,
+      total_pendiente: totalPendiente,
+      cuotas_pendientes: cuotasPendientes.length,
+      proxima_vencimiento: proximaVenc,
+    },
+    cuotas: cuotasPendientes.map((c) => ({
+      id: c.id,
+      nro_cuota: c.nro,
+      vencimiento: c.vencimiento,
+      monto: c.importe,
+      estado: c.estado,
+    })),
   });
 }
+
