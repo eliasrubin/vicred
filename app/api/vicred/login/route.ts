@@ -21,32 +21,23 @@ export async function POST(req: Request) {
     const { dni, clave } = await req.json();
 
     if (!dni || !clave) {
-      return NextResponse.json(
-        { error: "Datos incompletos" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Datos incompletos" }, { status: 400 });
     }
 
     const claveNormalizada = normalizeClave(clave);
 
     const { data, error } = await supabase
       .from("clientes")
-      .select("*")
+      .select("id, dni, clave")
       .eq("dni", dni)
       .single();
 
     if (error || !data) {
-      return NextResponse.json(
-        { error: "Cliente no encontrado" },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Cliente no encontrado" }, { status: 401 });
     }
 
     if (data.clave !== claveNormalizada) {
-      return NextResponse.json(
-        { error: "Clave incorrecta" },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Clave incorrecta" }, { status: 401 });
     }
 
     const token = jwt.sign(
@@ -55,13 +46,20 @@ export async function POST(req: Request) {
       { expiresIn: "7d" }
     );
 
-    return NextResponse.json({ token });
+    const res = NextResponse.json({ token });
+
+    res.cookies.set("auth", token, {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: "lax",
+      path: "/",
+      domain: isProd ? ".vicred.com.ar" : undefined,
+    });
+
+    return res;
   } catch (err) {
     console.error(err);
-    return NextResponse.json(
-      { error: "Error interno" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Error interno" }, { status: 500 });
   }
 }
 
