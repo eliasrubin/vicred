@@ -15,8 +15,11 @@ function normalizeClave(input: string) {
 }
 
 export async function POST(req: Request) {
+<<<<<<< HEAD
   const isProd = process.env.NODE_ENV === "production";
 
+=======
+>>>>>>> de87c22 (Trabajo local antes de sincronizar con remoto)
   try {
     const { dni, clave } = await req.json();
 
@@ -29,6 +32,7 @@ export async function POST(req: Request) {
     }
 
     const { data: cliente, error } = await supabase
+<<<<<<< HEAD
       .from("clientes")
       .select("id, dni, vicred_id")
       .eq("dni", Number(dniClean)) // más robusto si dni es numérico
@@ -67,12 +71,56 @@ export async function POST(req: Request) {
       sameSite: "lax",
       path: "/",
       domain: isProd ? ".vicred.com.ar" : undefined,
+=======
+  .from("clientes")
+  .select("id, dni, vicred_id")
+  .eq("dni", dniClean)
+  .eq("vicred_id", vicred_id)
+  .maybeSingle();
+
+console.log("LOGIN DEBUG", {
+  dni_input: dni,
+  dniClean,
+  clave_input: clave,
+  clave6,
+  vicred_id,
+  cliente,
+  error,
+});
+
+if (!cliente) {
+  return NextResponse.json({ error: "Datos incorrectos" }, { status: 401 });
+}
+
+const token = jwt.sign(
+  { cliente_id: cliente.id },
+  process.env.VICRED_JWT_SECRET!,
+  { expiresIn: "7d" }
+);
+
+    const res = NextResponse.json({ ok: true });
+
+    // IMPORTANTÍSIMO: en localhost secure debe ser false
+    res.cookies.set("vicred_session", token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: "/",
+>>>>>>> de87c22 (Trabajo local antes de sincronizar con remoto)
       maxAge: 60 * 60 * 24 * 7,
     });
 
     return res;
+<<<<<<< HEAD
   } catch (e) {
     if (!isProd) console.error("VICRED LOGIN ERROR", e);
     return NextResponse.json({ error: "No se pudo ingresar" }, { status: 500 });
   }
 }
+=======
+  } catch {
+    return NextResponse.json({ error: "No se pudo ingresar" }, { status: 500 });
+  }
+}
+
+>>>>>>> de87c22 (Trabajo local antes de sincronizar con remoto)
