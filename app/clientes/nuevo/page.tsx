@@ -60,7 +60,6 @@ export default function NuevoClientePage() {
         dni: dniClean || null,
         telefono: telefono.trim() || null,
         direccion: direccion.trim() || null,
-        estado, // 👈 guardamos también el estado
       })
       .select("id")
       .single();
