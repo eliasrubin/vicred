@@ -4,20 +4,33 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import jwt from "jsonwebtoken";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
 function normalizeClave(input: string) {
   const digits = (input || "").replace(/\D/g, "");
   return digits.padStart(6, "0").slice(-6);
 }
 
 export async function POST(req: Request) {
-  const isProd = process.env.NODE_ENV === "production";
-
   try {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const jwtSecret = process.env.JWT_SECRET;
+
+    if (!url || !key) {
+      return NextResponse.json(
+        { error: "Faltan variables de Supabase en el servidor" },
+        { status: 500 }
+      );
+    }
+    if (!jwtSecret) {
+      return NextResponse.json(
+        { error: "Falta JWT_SECRET en el servidor" },
+        { status: 500 }
+      );
+    }
+
+    const supabase = createClient(url, key);
+
+    const isProd = process.env.NODE_ENV === "production";
     const { dni, clave } = await req.json();
 
     if (!dni || !clave) {
@@ -40,11 +53,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Clave incorrecta" }, { status: 401 });
     }
 
-    const token = jwt.sign(
-      { id: data.id, dni: data.dni },
-      process.env.JWT_SECRET!,
-      { expiresIn: "7d" }
-    );
+    const token = jwt.sign({ id: data.id, dni: data.dni }, jwtSecret, {
+      expiresIn: "7d",
+    });
 
     const res = NextResponse.json({ token });
 
@@ -62,4 +73,3 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Error interno" }, { status: 500 });
   }
 }
-
