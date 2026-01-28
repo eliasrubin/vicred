@@ -1,5 +1,3 @@
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -16,6 +14,7 @@ type Venta = {
   saldo_pendiente: number;
   comercio_codigo?: string | null;
   comercio_nombre?: string | null;
+  cliente_id?: string;
 };
 
 export default function NuevoPago() {
@@ -107,7 +106,6 @@ export default function NuevoPago() {
       if (!vieneDeCuota) {
         setVentaId(""); // reset normal cuando elijo cliente manualmente
       } else {
-        // si la venta preseleccionada no está en abiertas, la limpiamos para evitar incoherencias
         const existe = abiertas.some((x: any) => x.id === prefVenta);
         if (!existe) setVentaId("");
       }
@@ -134,7 +132,6 @@ export default function NuevoPago() {
         if (error) throw error;
 
         if (!data || Number(data.saldo_pendiente) <= 0) {
-          setLoading(false);
           return setErr("Esa factura ya está cancelada. Elegí otra o dejá pago general.");
         }
       }

@@ -44,10 +44,11 @@ export default function ClienteDetalle() {
       .from("vw_ventas_saldo")
       .select("id,cliente_id,fecha,total,factura_numero,comercio_id,comercio_nombre,comercio_codigo,saldo_pendiente")
       .eq("cliente_id", id)
-      .order("fecha", { ascending: false });
+      .order("fecha", { ascending: false })
+      .limit(200);
 
     if (vErr) throw vErr;
-    setVentas(v as any);
+    setVentas(((v as any) || []) as VentaSaldo[]);
 
     const { data: q, error: qErr } = await supabase
       .from("cuotas")
@@ -56,13 +57,15 @@ export default function ClienteDetalle() {
       .order("vencimiento", { ascending: true });
 
     if (qErr) throw qErr;
-    setCuotas(q as any);
+    setCuotas((q as any) || []);
   };
 
   useEffect(() => {
     if (!id) return;
     load().catch((e) => setErr(e.message ?? String(e)));
   }, [id]);
+
+  const st = estado?.bloqueado_por_mora ? "BLOQUEADO" : estado?.en_observacion ? "OBSERVACIÓN" : "ACTIVO";
 
   const cuotasPorVenta = useMemo(() => {
     const map = new Map<string, any[]>();
@@ -77,94 +80,193 @@ export default function ClienteDetalle() {
 
   const ventasOrdenadas = useMemo(() => {
     const arr = [...ventas];
-    arr.sort((a, b) => Number(b.saldo_pendiente) - Number(a.saldo_pendiente));
+    arr.sort((a, b) => {
+      const sa = Number(a.saldo_pendiente);
+      const sb = Number(b.saldo_pendiente);
+      if (sa > 0 && sb === 0) return -1;
+      if (sa === 0 && sb > 0) return 1;
+      return String(b.fecha).localeCompare(String(a.fecha));
+    });
     return arr;
   }, [ventas]);
 
   return (
     <main style={{ maxWidth: 1100, margin: "30px auto", fontFamily: "system-ui" }}>
-      <button onClick={() => router.push("/clientes")}>← Volver</button>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <button onClick={() => router.push("/clientes")}>← Volver</button>
+
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <Link href="/ventas/nueva" style={btnLink}>+ Nueva venta</Link>
+          <Link href="/pagos/nuevo" style={btnLink}>+ Registrar pago</Link>
+          <Link href="/reportes" style={btnLink}>📊 Reportes</Link>
+          <Link href="/pagos/historial" style={btnLink}>🧾 Historial cobranzas</Link>
+        </div>
+      </div>
 
       {err && <p style={{ color: "crimson" }}>{err}</p>}
 
-      <h2>{cliente?.nombre}</h2>
+      <h2 style={{ marginTop: 16 }}>{cliente?.nombre ?? "Cliente"}</h2>
+      <p style={{ opacity: 0.8 }}>
+        DNI: {cliente?.dni ?? "-"} · Tel: {cliente?.telefono ?? "-"} · Dirección: {cliente?.direccion ?? "-"}
+      </p>
 
-      {ventasOrdenadas.map((v) => {
-        const cuotasDeEstaVenta = cuotasPorVenta.get(v.id) || [];
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 10, margin: "16px 0" }}>
+        <Card title="Límite" value={estado ? Number(estado.limite_total).toFixed(2) : "-"} />
+        <Card title="Disponible" value={estado ? Number(estado.disponible).toFixed(2) : "-"} />
+        <Card title="Deuda" value={estado ? Number(estado.deuda_total).toFixed(2) : "-"} />
+        <Card title="Estado" value={st} />
+        <Card title="Mora +30" value={estado?.bloqueado_por_mora ? "Sí" : "No"} />
+      </div>
 
-        return (
-          <div key={v.id} style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, marginTop: 16 }}>
-            <div style={{ fontWeight: 700 }}>
-              {v.factura_numero ? `Factura ${v.factura_numero}` : `Venta ${v.id.slice(0, 8)}`} · {v.comercio_codigo} · {v.fecha}
-            </div>
+      <section style={card}>
+        <h3 style={{ marginTop: 0 }}>Facturas / Ventas</h3>
+        <p style={{ opacity: 0.8 }}>
+          Tip: las que tienen <b>saldo pendiente</b> aparecen primero. Si está en 0, la factura está cancelada.
+        </p>
 
-            <div style={{ marginTop: 10 }}>
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                <thead>
-                  <tr>
-                    <th style={th}>Vencimiento</th>
-                    <th style={th}>Cuota</th>
-                    <th style={th}>Importe</th>
-                    <th style={th}>Pagado</th>
-                    <th style={th}>Saldo</th>
-                    <th style={th}>Estado</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {cuotasDeEstaVenta.map((q: any) => {
-                    const saldoCuota = Number(q.importe) - Number(q.pagado);
+        {ventasOrdenadas.map((v) => {
+          const saldo = Number(v.saldo_pendiente || 0);
+          const cuotasDeEstaVenta = cuotasPorVenta.get(v.id) || [];
 
-                    return (
-                      <tr key={q.id}>
-                        <td style={td}>{q.vencimiento}</td>
-                        <td style={td}>{q.nro}</td>
-                        <td style={td}>{Number(q.importe).toFixed(2)}</td>
-                        <td style={td}>{Number(q.pagado).toFixed(2)}</td>
+          return (
+            <div key={v.id} style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, marginTop: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontWeight: 700 }}>
+                    {v.factura_numero ? `Factura ${v.factura_numero}` : `Venta ${v.id.slice(0, 8)}`}
+                    {" · "}
+                    {v.comercio_codigo}
+                    {" · "}
+                    {v.fecha}
+                  </div>
+                  <div style={{ opacity: 0.8, marginTop: 4 }}>
+                    Total: ${Number(v.total).toFixed(2)} · Cuotas: {cuotasDeEstaVenta.length}
+                  </div>
+                </div>
 
-                        {/* 👇 SALDO + BOTÓN CHIQUITO */}
-                        <td style={td}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                            <b>{saldoCuota.toFixed(2)}</b>
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontSize: 12, opacity: 0.7 }}>Saldo pendiente</div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: saldo > 0 ? "black" : "#666" }}>${saldo.toFixed(2)}</div>
 
-                            {saldoCuota > 0.009 && (
-                              <Link
-                                href={`/pagos/nuevo?clienteId=${encodeURIComponent(
-                                  id
-                                )}&ventaId=${encodeURIComponent(v.id)}&monto=${encodeURIComponent(
-                                  saldoCuota.toFixed(2)
-                                )}&cuota=${encodeURIComponent(String(q.nro))}`}
-                                style={{
-                                  padding: "3px 8px",
-                                  border: "1px solid #ddd",
-                                  borderRadius: 8,
-                                  fontSize: 12,
-                                  textDecoration: "none",
-                                }}
-                              >
+                  {/* Solo Pagarés (sacamos el Cobrar general) */}
+                  <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap", marginTop: 8 }}>
+                    <Link href={`/ventas/${v.id}/pagares?print=1`} style={{ ...btnLink, display: "inline-block" }}>
+                      Pagarés (PDF)
+                    </Link>
+                    <Link href={`/ventas/${v.id}/pagares`} style={{ ...btnLink, display: "inline-block" }}>
+                      Ver pagarés
+                    </Link>
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ marginTop: 10 }}>
+                <table style={table}>
+                  <thead>
+                    <tr>
+                      <th style={th}>Vencimiento</th>
+                      <th style={th}>N°</th>
+                      <th style={th}>Importe</th>
+                      <th style={th}>Pagado</th>
+                      <th style={th}>Saldo</th>
+                      <th style={th}>Estado</th>
+                      <th style={th}>Acción</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {cuotasDeEstaVenta.map((q: any) => {
+                      const qs = Number(q.importe) - Number(q.pagado);
+                      const puedeCobrar = qs > 0;
+
+                      const href = `/pagos/nuevo?clienteId=${encodeURIComponent(String(id))}&ventaId=${encodeURIComponent(
+                        v.id
+                      )}&monto=${encodeURIComponent(qs.toFixed(2))}&cuota=${encodeURIComponent(String(q.nro))}`;
+
+                      return (
+                        <tr key={q.id}>
+                          <td style={td}>{q.vencimiento}</td>
+                          <td style={td}>{q.nro}</td>
+                          <td style={td}>{Number(q.importe).toFixed(2)}</td>
+                          <td style={td}>{Number(q.pagado).toFixed(2)}</td>
+                          <td style={td}>
+                            <b>{qs.toFixed(2)}</b>
+                          </td>
+                          <td style={td}>{q.estado}</td>
+                          <td style={td}>
+                            {puedeCobrar ? (
+                              <Link href={href} style={btnMini}>
                                 Cobrar
                               </Link>
+                            ) : (
+                              <span style={{ fontSize: 12, opacity: 0.6 }}>-</span>
                             )}
-                          </div>
-                        </td>
+                          </td>
+                        </tr>
+                      );
+                    })}
 
-                        <td style={td}>{q.estado}</td>
+                    {cuotasDeEstaVenta.length === 0 && (
+                      <tr>
+                        <td style={td} colSpan={7}>
+                          (No hay cuotas asociadas a esta venta)
+                        </td>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
+
+        {ventasOrdenadas.length === 0 && <p style={{ opacity: 0.8 }}>(Este cliente no tiene ventas todavía)</p>}
+      </section>
     </main>
   );
 }
+
+function Card({ title, value }: { title: string; value: string }) {
+  return (
+    <div style={{ border: "1px solid #e5e5e5", borderRadius: 10, padding: 12 }}>
+      <div style={{ fontSize: 12, opacity: 0.7 }}>{title}</div>
+      <div style={{ fontSize: 18, fontWeight: 700, marginTop: 6 }}>{value}</div>
+    </div>
+  );
+}
+
+const btnLink: React.CSSProperties = {
+  padding: "8px 12px",
+  border: "1px solid #ddd",
+  borderRadius: 8,
+  textDecoration: "none",
+};
+
+const btnMini: React.CSSProperties = {
+  padding: "6px 10px",
+  border: "1px solid #ddd",
+  borderRadius: 8,
+  textDecoration: "none",
+  display: "inline-block",
+  fontSize: 12,
+};
+
+const card: React.CSSProperties = {
+  marginTop: 14,
+  padding: 14,
+  border: "1px solid #eee",
+  borderRadius: 12,
+};
+
+const table: React.CSSProperties = {
+  width: "100%",
+  borderCollapse: "collapse",
+};
 
 const th: React.CSSProperties = {
   textAlign: "left",
   padding: 10,
   borderBottom: "1px solid #ddd",
+  whiteSpace: "nowrap",
 };
 
 const td: React.CSSProperties = {
