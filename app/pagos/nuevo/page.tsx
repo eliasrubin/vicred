@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "../../../lib/supabaseClient";
 
 type Cliente = { id: string; nombre: string; dni: string | null };
@@ -18,6 +18,7 @@ type Venta = {
 
 export default function NuevoPago() {
   const router = useRouter();
+  const sp = useSearchParams();
 
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [clienteId, setClienteId] = useState("");
@@ -32,6 +33,30 @@ export default function NuevoPago() {
   const [err, setErr] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // ✅ para no pisar el ventaId precargado
+  const prefVentaIdRef = useRef<string>("");
+  const prefClienteIdRef = useRef<string>("");
+
+  // ✅ leer parámetros una vez
+  useEffect(() => {
+    const qClienteId = sp.get("clienteId") || "";
+    const qVentaId = sp.get("ventaId") || "";
+    const qMonto = sp.get("monto") || "";
+    const qCuota = sp.get("cuota") || "";
+
+    prefClienteIdRef.current = qClienteId;
+    prefVentaIdRef.current = qVentaId;
+
+    if (qClienteId) setClienteId(qClienteId);
+    if (qVentaId) setVentaId(qVentaId);
+    if (qMonto) setMonto(qMonto);
+
+    if (qCuota) {
+      setOk(`🧾 Cobranza sugerida: cuota ${qCuota}. (Si hay cuotas anteriores pendientes, se aplica FIFO)`);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Cargar clientes
   useEffect(() => {
@@ -61,7 +86,7 @@ export default function NuevoPago() {
 
       const { data, error } = await supabase
         .from("vw_ventas_saldo")
-        .select("id,fecha,total,factura_numero,saldo_pendiente,comercio_codigo,comercio_nombre")
+        .select("id,fecha,total,factura_numero,saldo_pendiente,comercio_codigo,comercio_nombre,cliente_id")
         .eq("cliente_id", clienteId)
         .order("fecha", { ascending: false })
         .limit(200);
@@ -69,11 +94,26 @@ export default function NuevoPago() {
       if (error) throw error;
 
       const abiertas = (data || []).filter((v: any) => Number(v.saldo_pendiente) > 0);
-
       setVentas(abiertas as any);
-      setVentaId(""); // reset factura al cambiar cliente
+
+      // ✅ NO pisar ventaId si viene preseleccionado por URL para este mismo cliente
+      const prefCliente = prefClienteIdRef.current;
+      const prefVenta = prefVentaIdRef.current;
+
+      const vieneDeCuota = !!prefCliente && !!prefVenta && prefCliente === clienteId;
+
+      if (!vieneDeCuota) {
+        setVentaId(""); // reset normal cuando elijo cliente manualmente
+      } else {
+        // si la venta preseleccionada no está en abiertas, la limpiamos para evitar incoherencias
+        const existe = abiertas.some((x: any) => x.id === prefVenta);
+        if (!existe) setVentaId("");
+      }
     })().catch((e) => setErr(e.message ?? String(e)));
   }, [clienteId]);
+
+  // ✅ comercio visible según la factura seleccionada
+  const ventaSel = useMemo(() => ventas.find((v) => v.id === ventaId) || null, [ventas, ventaId]);
 
   const guardar = async () => {
     setErr(null);
@@ -88,12 +128,7 @@ export default function NuevoPago() {
     try {
       // Seguridad extra: si eligió factura, verificar saldo pendiente actual
       if (ventaId) {
-        const { data, error } = await supabase
-          .from("vw_ventas_saldo")
-          .select("saldo_pendiente")
-          .eq("id", ventaId)
-          .single();
-
+        const { data, error } = await supabase.from("vw_ventas_saldo").select("saldo_pendiente").eq("id", ventaId).single();
         if (error) throw error;
 
         if (!data || Number(data.saldo_pendiente) <= 0) {
@@ -110,7 +145,7 @@ export default function NuevoPago() {
           monto: nMonto,
           metodo,
           referencia: ref || null,
-          venta_id: ventaId || null, // 👈 si elegís factura => FIFO por factura (trigger DB)
+          venta_id: ventaId || null,
         })
         .select("id")
         .single();
@@ -124,7 +159,6 @@ export default function NuevoPago() {
           : "✅ Pago registrado y aplicado automáticamente a las cuotas (FIFO general). Generando comprobante..."
       );
 
-      // ✅ Ir al comprobante (y abrir imprimir / guardar PDF)
       router.push(`/pagos/${data.id}/comprobante?print=1`);
     } catch (e: any) {
       setErr(e?.message ?? String(e));
@@ -138,10 +172,10 @@ export default function NuevoPago() {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h2>Registrar pago</h2>
         <div style={{ display: "flex", gap: 10 }}>
-    <button onClick={() => router.push("/pagos/historial")}>Historial</button>
-    <button onClick={() => router.push("/clientes")}>Volver</button>
-  </div>
-</div>
+          <button onClick={() => router.push("/pagos/historial")}>Historial</button>
+          <button onClick={() => router.push("/clientes")}>Volver</button>
+        </div>
+      </div>
 
       {err && <p style={{ color: "crimson" }}>{err}</p>}
       {ok && <p style={{ color: "green" }}>{ok}</p>}
@@ -152,6 +186,9 @@ export default function NuevoPago() {
           <select
             value={clienteId}
             onChange={(e) => {
+              // al elegir manualmente, borro las preferencias de URL
+              prefClienteIdRef.current = "";
+              prefVentaIdRef.current = "";
               setClienteId(e.target.value);
               setVentaId("");
             }}
@@ -193,6 +230,13 @@ export default function NuevoPago() {
               </option>
             ))}
           </select>
+
+          {ventaSel && (
+            <div style={{ marginTop: 8, opacity: 0.85 }}>
+              <b>Comercio:</b> {ventaSel.comercio_codigo ? `${ventaSel.comercio_codigo} · ` : ""}
+              {ventaSel.comercio_nombre ?? "-"}
+            </div>
+          )}
         </div>
 
         <div>
@@ -227,5 +271,3 @@ export default function NuevoPago() {
     </main>
   );
 }
-
-
