@@ -85,9 +85,9 @@ export async function GET() {
   const ventasById: Record<string, any> = {};
   if (ventaIds.length) {
     const { data: ventas, error: eVentas } = await supabase
-      .from("ventas_credito")
-      .select("id, fecha, total, anticipo, vicred_id, vicred_num, factura_numero")
-      .in("id", ventaIds);
+     .from("ventas_credito")
+     .select("id, fecha, total, anticipo, forma_pago, factura_numero")
+     .in("id", ventaIds);
 
     if (eVentas) {
       return NextResponse.json({ error: `Error ventas: ${eVentas.message}` }, { status: 500 });
