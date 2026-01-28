@@ -8,7 +8,8 @@ import jwt from "jsonwebtoken";
 
 type Estado = {
   limite: number;
-  deuda_total: number;
+  total_pagado: number;
+  total_pendiente: number;
   disponible: number;
   cuotas_pendientes: number;
   cuotas_pagadas: number;
@@ -27,10 +28,7 @@ export async function GET() {
     );
   }
   if (!jwtSecret) {
-    return NextResponse.json(
-      { error: "Falta JWT_SECRET en el servidor" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Falta JWT_SECRET en el servidor" }, { status: 500 });
   }
 
   const token = (await cookies()).get("auth")?.value;
@@ -60,7 +58,7 @@ export async function GET() {
   }
 
   // 2) Límite (cuentas_credito)
-  const { data: cuenta, error: eCuenta } = await supabase
+  const { data: cuenta } = await supabase
     .from("cuentas_credito")
     .select("limite")
     .eq("cliente_id", cliente.id)
@@ -68,10 +66,10 @@ export async function GET() {
 
   const limite = Number((cuenta as any)?.limite ?? 0) || 0;
 
-  // 3) Cuotas del cliente (según columnas reales)
+  // 3) Cuotas del cliente
   const { data: cuotasRaw, error: eCuotas } = await supabase
     .from("cuotas")
-    .select("id, venta_id, cliente_id, nro, vencimiento, importe, pagado, estado, created_at")
+    .select("id, venta_id, cliente_id, nro, vencimiento, importe, pagado, estado")
     .eq("cliente_id", cliente.id)
     .order("vencimiento", { ascending: true });
 
@@ -81,34 +79,26 @@ export async function GET() {
 
   const cuotas = Array.isArray(cuotasRaw) ? cuotasRaw : [];
 
-  // 4) Ventas vinculadas (según columnas reales de ventas_credito)
+  // 4) Ventas vinculadas (solo columnas reales)
   const ventaIds = Array.from(new Set(cuotas.map((c: any) => c.venta_id).filter(Boolean)));
 
   const ventasById: Record<string, any> = {};
-  let ventasList: any[] = [];
-
   if (ventaIds.length) {
     const { data: ventas, error: eVentas } = await supabase
-     .from("ventas_credito")
-     .select("id, fecha, total, anticipo, factura_numero, cuotas_cantidad, observacion, primer_vencimiento")
-     .in("id", ventaIds)
-     .order("fecha", { ascending: false });
+      .from("ventas_credito")
+      .select("id, fecha, total, anticipo, cuotas_cantidad, observacion, factura_numero, comercio_id, primer_vencimiento")
+      .in("id", ventaIds);
 
     if (eVentas) {
       return NextResponse.json({ error: `Error ventas: ${eVentas.message}` }, { status: 500 });
     }
 
-    ventasList = Array.isArray(ventas) ? ventas : [];
-
-    for (const v of ventasList) {
+    (ventas || []).forEach((v: any) => {
       ventasById[v.id] = v;
-    }
+    });
   }
 
-  // 5) Pagos aplicados a cuotas (si existen relaciones)
-  // Modelo asumido:
-  // pagos_aplicaciones(cuota_id, pago_id, importe)
-  // pagos(id, fecha, importe)
+  // 5) Fecha de pago (si existe modelo pagos_aplicaciones + pagos)
   const cuotaIds = cuotas.map((c: any) => c.id);
   const pagosPorCuota: Record<string, any[]> = {};
 
@@ -118,7 +108,7 @@ export async function GET() {
       .select("id, cuota_id, pago_id, importe, pagos:pagos (id, fecha, importe)")
       .in("cuota_id", cuotaIds);
 
-    // Si falla por nombres/relación, NO rompemos el portal:
+    // Si falla (por relaciones/nombres), no rompemos el portal.
     if (!eApps && Array.isArray(apps)) {
       for (const a of apps as any[]) {
         if (!pagosPorCuota[a.cuota_id]) pagosPorCuota[a.cuota_id] = [];
@@ -131,7 +121,7 @@ export async function GET() {
     }
   }
 
-  // 6) Cuotas “enriquecidas” (incluye factura_numero y fecha de pago)
+  // 6) Cuotas enriquecidas
   const cuotasEnriquecidas = cuotas.map((c: any) => {
     const venta = ventasById[c.venta_id] || null;
     const pagos = pagosPorCuota[c.id] || [];
@@ -145,39 +135,46 @@ export async function GET() {
 
     return {
       ...c,
-      venta, // <- acá está factura_numero, total, anticipo, etc.
+      factura_numero: venta?.factura_numero ?? null,
+      venta,
       pago_fecha: pagoFecha,
       pagos,
     };
   });
 
-  // 7) Estado de crédito
-  let deudaTotal = 0;
+  // 7) Estado (esto arregla tu “0”)
+  let totalPagado = 0;
+  let totalPendiente = 0;
   let cuotasPendientes = 0;
   let cuotasPagadas = 0;
   let proximoVenc: string | null = null;
 
   for (const c of cuotasEnriquecidas as any[]) {
-    const estado = String(c.estado || "").toUpperCase();
     const importe = Number(c.importe ?? 0) || 0;
     const pagado = Number(c.pagado ?? 0) || 0;
+
     const pendiente = Math.max(0, importe - pagado);
 
-    if (estado === "PAGADA" || pendiente === 0) {
-      cuotasPagadas += 1;
-    } else {
+    totalPagado += Math.min(importe, pagado);
+    totalPendiente += pendiente;
+
+    const est = String(c.estado || "").toUpperCase();
+    const esPagada = est === "PAGADA" || pendiente === 0;
+
+    if (esPagada) cuotasPagadas += 1;
+    else {
       cuotasPendientes += 1;
-      deudaTotal += pendiente;
       const v = c.vencimiento ? String(c.vencimiento).slice(0, 10) : null;
       if (v && (!proximoVenc || v < proximoVenc)) proximoVenc = v;
     }
   }
 
-  const disponible = Math.max(0, limite - deudaTotal);
+  const disponible = Math.max(0, limite - totalPendiente);
 
   const estado: Estado = {
     limite,
-    deuda_total: deudaTotal,
+    total_pagado: totalPagado,
+    total_pendiente: totalPendiente,
     disponible,
     cuotas_pendientes: cuotasPendientes,
     cuotas_pagadas: cuotasPagadas,
@@ -187,7 +184,6 @@ export async function GET() {
   return NextResponse.json({
     cliente,
     estado,
-    ventas: ventasList,          // ✅ lista de facturas (para links)
-    cuotas: cuotasEnriquecidas,  // ✅ cuotas con venta.factura_numero + pago_fecha
+    cuotas: cuotasEnriquecidas,
   });
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 function formatMoney(n: any) {
@@ -19,6 +20,10 @@ function formatDate(d: any) {
   if (parts.length !== 3) return s;
   const [y, m, dd] = parts;
   return `${dd}/${m}/${y}`;
+}
+
+function upper(x: any) {
+  return String(x ?? "").toUpperCase();
 }
 
 export default function VicredPanelPage() {
@@ -42,14 +47,16 @@ export default function VicredPanelPage() {
       .catch((e) => setError(e?.message || "Error"));
   }, []);
 
-  // ✅ SIEMPRE definimos estas variables (aunque no haya data)
   const cliente = data?.cliente ?? null;
   const estado = data?.estado ?? {};
   const cuotas = Array.isArray(data?.cuotas) ? data.cuotas : [];
 
-  // ✅ Hook SIEMPRE se ejecuta (nunca después de un return)
   const cuotasPendientes = useMemo(() => {
-    return cuotas.filter((c: any) => String(c?.estado || "").toUpperCase() !== "PAGADA");
+    return cuotas.filter((c: any) => upper(c?.estado) !== "PAGADA");
+  }, [cuotas]);
+
+  const cuotasPagadas = useMemo(() => {
+    return cuotas.filter((c: any) => upper(c?.estado) === "PAGADA");
   }, [cuotas]);
 
   if (error) return <div style={{ padding: 20 }}>Error: {error}</div>;
@@ -63,7 +70,7 @@ export default function VicredPanelPage() {
 
   const waLink = `https://wa.me/?text=${encodeURIComponent(waMsg)}`;
 
-  const Card = ({ title, children }: any) => (
+  const Card = ({ title, subtitle, children }: any) => (
     <div
       style={{
         marginTop: 16,
@@ -73,15 +80,111 @@ export default function VicredPanelPage() {
         background: "#fff",
       }}
     >
-      <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 10 }}>{title}</div>
-      {children}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
+        <div style={{ fontSize: 16, fontWeight: 800 }}>{title}</div>
+        {subtitle ? <div style={{ color: "#666", fontSize: 13 }}>{subtitle}</div> : null}
+      </div>
+      <div style={{ marginTop: 10 }}>{children}</div>
     </div>
   );
 
   const Row = ({ label, value }: any) => (
     <div style={{ display: "flex", gap: 10, padding: "6px 0" }}>
       <div style={{ width: 170, color: "#555" }}>{label}</div>
-      <div style={{ fontWeight: 600 }}>{value ?? "-"}</div>
+      <div style={{ fontWeight: 700 }}>{value ?? "-"}</div>
+    </div>
+  );
+
+  const FacturaLink = ({ cuota }: { cuota: any }) => {
+    const ventaId = cuota?.venta?.id ?? cuota?.venta_id ?? null;
+    const factura = cuota?.venta?.factura_numero ?? cuota?.factura_numero ?? null;
+
+    if (!ventaId) return <span>-</span>;
+
+    return (
+      <Link href={`/vicred/venta/${ventaId}`} style={{ textDecoration: "none", fontWeight: 800 }}>
+        {factura || "Ver venta"}
+      </Link>
+    );
+  };
+
+  const EstadoPill = ({ est }: { est: string }) => (
+    <span
+      style={{
+        padding: "4px 10px",
+        borderRadius: 999,
+        border: "1px solid #ddd",
+        fontSize: 13,
+        background: "#fff",
+      }}
+    >
+      {est}
+    </span>
+  );
+
+  const CuotaRow = ({ c, clickableCuota }: { c: any; clickableCuota: boolean }) => {
+    const nro = c?.nro ?? c?.nro_cuota ?? "-";
+    const venc = c?.vencimiento ?? c?.vencimiento_fecha ?? c?.fecha_vencimiento;
+    const imp = c?.importe ?? c?.monto ?? 0;
+    const est = upper(c?.estado || "PENDIENTE");
+    const pagoFecha = c?.pago_fecha ? formatDate(c.pago_fecha) : "-";
+
+    const cuotaCell = clickableCuota ? (
+      <Link href={`/vicred/cuota/${c?.id}`} style={{ textDecoration: "none", fontWeight: 800 }}>
+        #{nro}
+      </Link>
+    ) : (
+      <span style={{ fontWeight: 800 }}>#{nro}</span>
+    );
+
+    return (
+      <tr key={c?.id ?? `${nro}-${String(venc)}`}>
+        <td style={{ padding: "10px 8px", borderBottom: "1px solid #f2f2f2" }}>{cuotaCell}</td>
+        <td style={{ padding: "10px 8px", borderBottom: "1px solid #f2f2f2" }}>
+          <FacturaLink cuota={c} />
+        </td>
+        <td style={{ padding: "10px 8px", borderBottom: "1px solid #f2f2f2" }}>{formatDate(venc)}</td>
+        <td style={{ padding: "10px 8px", borderBottom: "1px solid #f2f2f2" }}>{formatMoney(imp)}</td>
+        <td style={{ padding: "10px 8px", borderBottom: "1px solid #f2f2f2" }}>
+          <EstadoPill est={est} />
+        </td>
+        <td style={{ padding: "10px 8px", borderBottom: "1px solid #f2f2f2" }}>{pagoFecha}</td>
+      </tr>
+    );
+  };
+
+  const Table = ({ rows, clickablePagadas }: { rows: any[]; clickablePagadas: boolean }) => (
+    <div style={{ overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <thead>
+          <tr>
+            <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #eee", color: "#666" }}>
+              Cuota
+            </th>
+            <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #eee", color: "#666" }}>
+              Factura
+            </th>
+            <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #eee", color: "#666" }}>
+              Vence
+            </th>
+            <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #eee", color: "#666" }}>
+              Importe
+            </th>
+            <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #eee", color: "#666" }}>
+              Estado
+            </th>
+            <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #eee", color: "#666" }}>
+              Fecha de pago
+            </th>
+          </tr>
+        </thead>
+
+        <tbody>
+          {rows.map((c) => (
+            <CuotaRow key={c?.id} c={c} clickableCuota={clickablePagadas && upper(c?.estado) === "PAGADA"} />
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 
@@ -89,7 +192,7 @@ export default function VicredPanelPage() {
     <div style={{ maxWidth: 900, margin: "36px auto", padding: 16 }}>
       <h1 style={{ margin: 0 }}>VICRED — Portal Cliente</h1>
       <p style={{ marginTop: 8, color: "#666" }}>
-        Acá podés ver tu estado y las cuotas pendientes.
+        Acá podés ver tu estado, tus cuotas pendientes y tus cuotas pagadas.
       </p>
 
       <Card title="Cliente">
@@ -102,86 +205,42 @@ export default function VicredPanelPage() {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <div style={{ padding: 14, border: "1px solid #eee", borderRadius: 12 }}>
             <div style={{ color: "#666", fontSize: 13 }}>Total pagado</div>
-            <div style={{ fontSize: 22, fontWeight: 800 }}>
-              {formatMoney(estado?.total_pagado)}
-            </div>
+            <div style={{ fontSize: 22, fontWeight: 900 }}>{formatMoney(estado?.total_pagado)}</div>
           </div>
 
           <div style={{ padding: 14, border: "1px solid #eee", borderRadius: 12 }}>
             <div style={{ color: "#666", fontSize: 13 }}>Total pendiente</div>
-            <div style={{ fontSize: 22, fontWeight: 800 }}>
-              {formatMoney(estado?.total_pendiente)}
-            </div>
+            <div style={{ fontSize: 22, fontWeight: 900 }}>{formatMoney(estado?.total_pendiente)}</div>
           </div>
 
           <div style={{ padding: 14, border: "1px solid #eee", borderRadius: 12 }}>
             <div style={{ color: "#666", fontSize: 13 }}>Cuotas pendientes</div>
-            <div style={{ fontSize: 22, fontWeight: 800 }}>
+            <div style={{ fontSize: 22, fontWeight: 900 }}>
               {estado?.cuotas_pendientes ?? cuotasPendientes.length ?? 0}
             </div>
           </div>
 
           <div style={{ padding: 14, border: "1px solid #eee", borderRadius: 12 }}>
             <div style={{ color: "#666", fontSize: 13 }}>Próximo vencimiento</div>
-            <div style={{ fontSize: 22, fontWeight: 800 }}>
-              {formatDate(estado?.proximo_vencimiento)}
-            </div>
+            <div style={{ fontSize: 22, fontWeight: 900 }}>{formatDate(estado?.proximo_vencimiento)}</div>
           </div>
         </div>
       </Card>
 
-      <Card title="Cuotas pendientes">
-        {cuotasPendientes.length ? (
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr>
-                  <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #eee", color: "#666" }}>
-                    Cuota
-                  </th>
-                  <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #eee", color: "#666" }}>
-                    Vence
-                  </th>
-                  <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #eee", color: "#666" }}>
-                    Importe
-                  </th>
-                  <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #eee", color: "#666" }}>
-                    Estado
-                  </th>
-                </tr>
-              </thead>
+      <Card title="Cuotas pendientes" subtitle={`${cuotasPendientes.length} cuotas`}>
+        {cuotasPendientes.length ? <Table rows={cuotasPendientes} clickablePagadas={false} /> : <div>No tenés cuotas pendientes ✅</div>}
+      </Card>
 
-              <tbody>
-                {cuotasPendientes.map((c: any) => {
-                  const nro = c?.nro ?? c?.nro_cuota ?? "-";
-                  const venc = c?.vencimiento ?? c?.vencimiento_fecha ?? c?.fecha_vencimiento;
-                  const imp = c?.importe ?? c?.monto ?? 0;
-                  const est = String(c?.estado ?? "PENDIENTE").toUpperCase();
-
-                  return (
-                    <tr key={c?.id ?? `${nro}-${String(venc)}`}>
-                      <td style={{ padding: "10px 8px", borderBottom: "1px solid #f2f2f2", fontWeight: 700 }}>
-                        #{nro}
-                      </td>
-                      <td style={{ padding: "10px 8px", borderBottom: "1px solid #f2f2f2" }}>
-                        {formatDate(venc)}
-                      </td>
-                      <td style={{ padding: "10px 8px", borderBottom: "1px solid #f2f2f2" }}>
-                        {formatMoney(imp)}
-                      </td>
-                      <td style={{ padding: "10px 8px", borderBottom: "1px solid #f2f2f2" }}>
-                        <span style={{ padding: "4px 10px", borderRadius: 999, border: "1px solid #ddd", fontSize: 13 }}>
-                          {est}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+      <Card title="Cuotas pagadas" subtitle={`${cuotasPagadas.length} cuotas`}>
+        {cuotasPagadas.length ? (
+          <div style={{ marginBottom: 8 }}>
+            <div style={{ color: "#666", fontSize: 13, marginBottom: 10 }}>
+              Tip: hacé click en el <b>número de cuota</b> para ver el detalle del pago.
+            </div>
+            <Table rows={cuotasPagadas} clickablePagadas={true} />
           </div>
         ) : (
-          <div>No tenés cuotas pendientes ✅</div>
+          <div>Todavía no hay cuotas pagadas.</div>
         )}
       </Card>
 
@@ -194,7 +253,7 @@ export default function VicredPanelPage() {
               borderRadius: 12,
               border: "1px solid #ddd",
               background: "#fff",
-              fontWeight: 700,
+              fontWeight: 800,
             }}
           >
             Contactar por WhatsApp
