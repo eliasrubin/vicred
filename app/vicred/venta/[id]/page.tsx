@@ -78,12 +78,11 @@ export default function VentaDetallePage() {
       </div>
 
       <Card title={`Factura: ${venta?.factura_numero ?? "-"}`}>
-        <Row label="Fecha" value={formatDate(venta?.fecha)} />
+        <Row label="Fecha de Compra" value={formatDate(venta?.fecha)} />
         <Row label="Total" value={formatMoney(venta?.total)} />
         <Row label="Anticipo" value={formatMoney(venta?.anticipo)} />
         <Row label="Cantidad de cuotas" value={venta?.cuotas_cantidad ?? "-"} />
-        <Row label="Comercio ID" value={venta?.comercio_id ?? "-"} />
-        <Row label="Fecha de Compra" value={formatDate(venta?.primer_vencimiento)} />
+        <Row label="Comercio ID" value={venta?.comercio_codigo ?? "-"} />
         <Row label="Observación" value={venta?.observacion ?? "-"} />
       </Card>
 
