@@ -5,18 +5,20 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import jwt from "jsonwebtoken";
 
+const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const jwtSecret = process.env.VICRED_JWT_SECRET;
+
 function normalizeClave(input: string) {
   const digits = (input || "").replace(/\D/g, "");
   return digits.padStart(6, "0").slice(-6);
 }
 
 export async function POST(req: Request) {
-  try {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    const jwtSecret = process.env.JWT_SECRET;
+  const isProd = process.env.NODE_ENV === "production";
 
-    if (!url || !key) {
+  try {
+    if (!url || !serviceKey) {
       return NextResponse.json(
         { error: "Faltan variables de Supabase en el servidor" },
         { status: 500 }
@@ -24,66 +26,51 @@ export async function POST(req: Request) {
     }
     if (!jwtSecret) {
       return NextResponse.json(
-        { error: "Falta JWT_SECRET en el servidor" },
+        { error: "Falta VICRED_JWT_SECRET en el servidor" },
         { status: 500 }
       );
     }
 
-    const supabase = createClient(url, key);
-
-    const isProd = process.env.NODE_ENV === "production";
     const { dni, clave } = await req.json();
 
-    if (!dni || !clave) {
-      return NextResponse.json({ error: "Datos incompletos" }, { status: 400 });
+    const dniClean = String(dni || "").replace(/\D/g, "");
+    const clave6 = normalizeClave(String(clave || ""));
+    const vicred_id = `VC-${clave6}`;
+
+    if (dniClean.length < 7 || clave6.length !== 6) {
+      return NextResponse.json({ error: "Datos inválidos" }, { status: 400 });
     }
 
-    const dniClean = String(dni).replace(/\D/g, "");
-    const claveNormalizada = normalizeClave(clave);
+    const supabase = createClient(url, serviceKey);
 
-    const { data, error } = await supabase
+    const { data: cliente, error } = await supabase
       .from("clientes")
-      .select("id, dni, vicred_num")
-      .eq("dni", dniClean)
+      .select("id, dni, vicred_id")
+      .eq("dni", Number(dniClean))
+      .eq("vicred_id", vicred_id)
       .maybeSingle();
 
-    if (error) {
-      return NextResponse.json(
-        { error: `Error Supabase: ${error.message}` },
-        { status: 500 }
-      );
+    if (error || !cliente) {
+      return NextResponse.json({ error: "Datos incorrectos" }, { status: 401 });
     }
 
-    if (!data) {
-      return NextResponse.json(
-        { error: "Cliente no encontrado" },
-        { status: 401 }
-      );
-    }
+    const token = jwt.sign({ cliente_id: cliente.id }, jwtSecret, { expiresIn: "7d" });
 
-    const claveEsperada = String(data.vicred_num ?? "").padStart(6, "0");
+    const res = NextResponse.json({ ok: true });
+    res.headers.set("Cache-Control", "no-store");
 
-    if (claveEsperada !== claveNormalizada) {
-      return NextResponse.json({ error: "Clave incorrecta" }, { status: 401 });
-    }
-
-    const token = jwt.sign({ id: data.id, dni: data.dni }, jwtSecret, {
-      expiresIn: "7d",
-    });
-
-    const res = NextResponse.json({ token });
-
-    res.cookies.set("auth", token, {
+    res.cookies.set("vicred_session", token, {
       httpOnly: true,
       secure: isProd,
       sameSite: "lax",
       path: "/",
       domain: isProd ? ".vicred.com.ar" : undefined,
+      maxAge: 60 * 60 * 24 * 7,
     });
 
     return res;
-  } catch (err) {
-    console.error(err);
-    return NextResponse.json({ error: "Error interno" }, { status: 500 });
+  } catch (e) {
+    if (!isProd) console.error("VICRED LOGIN ERROR", e);
+    return NextResponse.json({ error: "No se pudo ingresar" }, { status: 500 });
   }
 }
