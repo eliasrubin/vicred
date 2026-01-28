@@ -82,7 +82,7 @@ export default function VentaDetallePage() {
         <Row label="Total" value={formatMoney(venta?.total)} />
         <Row label="Anticipo" value={formatMoney(venta?.anticipo)} />
         <Row label="Cantidad de cuotas" value={venta?.cuotas_cantidad ?? "-"} />
-        <Row label="Comercio ID" value={venta?.comercio_codigo ?? "-"} />
+        <Row label="Comercio ID" value={venta?.comercio_id ?? "-"} />
         <Row label="Observación" value={venta?.observacion ?? "-"} />
       </Card>
 
