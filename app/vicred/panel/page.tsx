@@ -188,6 +188,13 @@ export default function VicredPanelPage() {
     </div>
   );
 
+  // ✅ DISPONIBLE (la columna existe en vw_estado_credito)
+  const disponible = estado?.disponible ?? 0;
+
+  // Opcionales (si existen en tu vista, los mostramos; si no existen, no molestan)
+  const limite = estado?.limite_credito ?? estado?.limite ?? null;
+  const usado = estado?.deuda_total ?? estado?.saldo_utilizado ?? estado?.usado ?? null;
+
   return (
     <div style={{ maxWidth: 900, margin: "36px auto", padding: 16 }}>
       <h1 style={{ margin: 0 }}>VICRED — Portal Cliente</h1>
@@ -199,6 +206,30 @@ export default function VicredPanelPage() {
         <Row label="Nombre" value={cliente?.nombre || "-"} />
         <Row label="DNI" value={cliente?.dni || "-"} />
         <Row label="Nº Vicred" value={cliente?.vicred_id || "-"} />
+      </Card>
+
+      {/* ✅ NUEVO: Disponible para compras */}
+      <Card title="Disponible para compras">
+        <div style={{ fontSize: 40, fontWeight: 900, letterSpacing: "-0.02em" }}>
+          {formatMoney(disponible)}
+        </div>
+
+        {(limite != null || usado != null) && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
+            {limite != null && (
+              <div style={{ padding: 14, border: "1px solid #eee", borderRadius: 12 }}>
+                <div style={{ color: "#666", fontSize: 13 }}>Límite</div>
+                <div style={{ fontSize: 20, fontWeight: 900 }}>{formatMoney(limite)}</div>
+              </div>
+            )}
+            {usado != null && (
+              <div style={{ padding: 14, border: "1px solid #eee", borderRadius: 12 }}>
+                <div style={{ color: "#666", fontSize: 13 }}>Usado</div>
+                <div style={{ fontSize: 20, fontWeight: 900 }}>{formatMoney(usado)}</div>
+              </div>
+            )}
+          </div>
+        )}
       </Card>
 
       <Card title="Estado de tu crédito">
@@ -228,7 +259,11 @@ export default function VicredPanelPage() {
       </Card>
 
       <Card title="Cuotas pendientes" subtitle={`${cuotasPendientes.length} cuotas`}>
-        {cuotasPendientes.length ? <Table rows={cuotasPendientes} clickablePagadas={false} /> : <div>No tenés cuotas pendientes ✅</div>}
+        {cuotasPendientes.length ? (
+          <Table rows={cuotasPendientes} clickablePagadas={false} />
+        ) : (
+          <div>No tenés cuotas pendientes ✅</div>
+        )}
       </Card>
 
       <Card title="Cuotas pagadas" subtitle={`${cuotasPagadas.length} cuotas`}>
