@@ -90,7 +90,7 @@ export async function GET() {
   if (ventaIds.length) {
     const { data: ventas, error: eVentas } = await supabase
      .from("ventas_credito")
-     .select("id, fecha, total, anticipo, factura_numero, cuotas_cantidad, observacion, primer_vencincimiento")
+     .select("id, fecha, total, anticipo, factura_numero, cuotas_cantidad, observacion, primer_vencimiento")
      .in("id", ventaIds)
      .order("fecha", { ascending: false });
 
