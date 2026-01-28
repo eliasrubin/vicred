@@ -26,9 +26,9 @@ export async function GET() {
     );
   }
 
-  // ✅ Usamos la cookie real del portal Vicred
-const cookieStore = await cookies();
-const token = cookieStore.get("vicred_session")?.value;
+  // ✅ Cookie real del portal Vicred
+  const cookieStore = await cookies();
+  const token = cookieStore.get("vicred_session")?.value;
   if (!token) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
 
   let payload: any;
@@ -43,7 +43,7 @@ const token = cookieStore.get("vicred_session")?.value;
 
   const supabase = createClient(url, key);
 
-  // 1) Cliente (por ID, que es lo que viene en el JWT)
+  // 1) Cliente (por ID)
   const { data: cliente, error: eCliente } = await supabase
     .from("clientes")
     .select("*")
@@ -54,10 +54,10 @@ const token = cookieStore.get("vicred_session")?.value;
     return NextResponse.json({ error: "No autorizado" }, { status: 401 });
   }
 
-  // 2) Cuotas del cliente
+  // 2) Cuotas del cliente (⚠️ sin factura_numero porque no existe en cuotas)
   const { data: cuotasRaw, error: eCuotas } = await supabase
     .from("cuotas")
-    .select("id, venta_id, cliente_id, nro, vencimiento, importe, pagado, estado, factura_numero")
+    .select("id, venta_id, cliente_id, nro, vencimiento, importe, pagado, estado")
     .eq("cliente_id", cliente.id)
     .order("vencimiento", { ascending: true });
 
@@ -74,7 +74,9 @@ const token = cookieStore.get("vicred_session")?.value;
   if (ventaIds.length) {
     const { data: ventas, error: eVentas } = await supabase
       .from("ventas_credito")
-      .select("id, fecha, total, anticipo, cuotas_cantidad, observacion, factura_numero, comercio_id, primer_vencimiento")
+      .select(
+        "id, fecha, total, anticipo, cuotas_cantidad, observacion, factura_numero, comercio_id, primer_vencimiento"
+      )
       .in("id", ventaIds);
 
     if (eVentas) {
@@ -123,14 +125,15 @@ const token = cookieStore.get("vicred_session")?.value;
 
     return {
       ...c,
-      factura_numero: c?.factura_numero ?? venta?.factura_numero ?? null,
+      // factura_numero viene de la venta (no de cuotas)
+      factura_numero: venta?.factura_numero ?? null,
       venta,
       pago_fecha: pagoFecha,
       pagos,
     };
   });
 
-  // ✅ 6) Estado desde la vista vw_estado_credito (fuente única de verdad)
+  // ✅ 6) Estado desde vw_estado_credito (fuente única)
   const { data: estado, error: eEstado } = await supabase
     .from("vw_estado_credito")
     .select("*")
