@@ -27,7 +27,10 @@ export async function GET() {
     );
   }
   if (!jwtSecret) {
-    return NextResponse.json({ error: "Falta JWT_SECRET en el servidor" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Falta JWT_SECRET en el servidor" },
+      { status: 500 }
+    );
   }
 
   const token = (await cookies()).get("auth")?.value;
@@ -63,13 +66,12 @@ export async function GET() {
     .eq("cliente_id", cliente.id)
     .maybeSingle();
 
-  // Si no existe cuenta, lo tomamos como 0 (para no romper el portal)
   const limite = Number((cuenta as any)?.limite ?? 0) || 0;
 
-  // 3) Cuotas del cliente
+  // 3) Cuotas del cliente (según columnas reales)
   const { data: cuotasRaw, error: eCuotas } = await supabase
     .from("cuotas")
-    .select("id, venta_id, cliente_id, nro, vencimiento, importe, pagado, estado")
+    .select("id, venta_id, cliente_id, nro, vencimiento, importe, pagado, estado, created_at")
     .eq("cliente_id", cliente.id)
     .order("vencimiento", { ascending: true });
 
@@ -79,27 +81,36 @@ export async function GET() {
 
   const cuotas = Array.isArray(cuotasRaw) ? cuotasRaw : [];
 
-  // 4) Traer ventas vinculadas (para "factura" y detalle)
+  // 4) Ventas vinculadas (según columnas reales de ventas_credito)
   const ventaIds = Array.from(new Set(cuotas.map((c: any) => c.venta_id).filter(Boolean)));
 
   const ventasById: Record<string, any> = {};
+  let ventasList: any[] = [];
+
   if (ventaIds.length) {
     const { data: ventas, error: eVentas } = await supabase
-     .from("ventas_credito")
-     .select("id, fecha, total, anticipo, forma_pago, factura_numero")
-     .in("id", ventaIds);
+      .from("ventas_credito")
+      .select(
+        "id, cliente_id, comercio_id, fecha, total, anticipo, cuotas_cantidad, observacion, factura_numero, created_at, primer_vencincimiento"
+      )
+      .in("id", ventaIds)
+      .order("fecha", { ascending: false });
 
     if (eVentas) {
       return NextResponse.json({ error: `Error ventas: ${eVentas.message}` }, { status: 500 });
     }
 
-    (ventas || []).forEach((v: any) => {
+    ventasList = Array.isArray(ventas) ? ventas : [];
+
+    for (const v of ventasList) {
       ventasById[v.id] = v;
-    });
+    }
   }
 
-  // 5) Pagos aplicados a cuotas (para fecha de pago)
-  // Suposición de modelo: pagos_aplicaciones(cuota_id, pago_id, importe) y pagos(id, fecha, importe)
+  // 5) Pagos aplicados a cuotas (si existen relaciones)
+  // Modelo asumido:
+  // pagos_aplicaciones(cuota_id, pago_id, importe)
+  // pagos(id, fecha, importe)
   const cuotaIds = cuotas.map((c: any) => c.id);
   const pagosPorCuota: Record<string, any[]> = {};
 
@@ -109,7 +120,7 @@ export async function GET() {
       .select("id, cuota_id, pago_id, importe, pagos:pagos (id, fecha, importe)")
       .in("cuota_id", cuotaIds);
 
-    // Si esta consulta falla por nombres/relaciones, no rompemos el portal:
+    // Si falla por nombres/relación, NO rompemos el portal:
     if (!eApps && Array.isArray(apps)) {
       for (const a of apps as any[]) {
         if (!pagosPorCuota[a.cuota_id]) pagosPorCuota[a.cuota_id] = [];
@@ -122,12 +133,11 @@ export async function GET() {
     }
   }
 
-  // 6) Armar cuotas “enriquecidas”
+  // 6) Cuotas “enriquecidas” (incluye factura_numero y fecha de pago)
   const cuotasEnriquecidas = cuotas.map((c: any) => {
     const venta = ventasById[c.venta_id] || null;
     const pagos = pagosPorCuota[c.id] || [];
 
-    // fecha de pago: tomamos la más reciente si hay varias
     const pagoFecha =
       pagos
         .map((p: any) => p.fecha)
@@ -137,13 +147,13 @@ export async function GET() {
 
     return {
       ...c,
-      venta,
+      venta, // <- acá está factura_numero, total, anticipo, etc.
       pago_fecha: pagoFecha,
       pagos,
     };
   });
 
-  // 7) Estado de crédito (deuda, disponible, contadores)
+  // 7) Estado de crédito
   let deudaTotal = 0;
   let cuotasPendientes = 0;
   let cuotasPagadas = 0;
@@ -179,6 +189,7 @@ export async function GET() {
   return NextResponse.json({
     cliente,
     estado,
-    cuotas: cuotasEnriquecidas,
+    ventas: ventasList,          // ✅ lista de facturas (para links)
+    cuotas: cuotasEnriquecidas,  // ✅ cuotas con venta.factura_numero + pago_fecha
   });
 }
