@@ -89,12 +89,10 @@ export async function GET() {
 
   if (ventaIds.length) {
     const { data: ventas, error: eVentas } = await supabase
-      .from("ventas_credito")
-      .select(
-        "id, cliente_id, comercio_id, fecha, total, anticipo, cuotas_cantidad, observacion, factura_numero, created_at, primer_vencincimiento"
-      )
-      .in("id", ventaIds)
-      .order("fecha", { ascending: false });
+     .from("ventas_credito")
+     .select("id, fecha, total, anticipo, factura_numero, cuotas_cantidad, observacion, primer_vencincimiento")
+     .in("id", ventaIds)
+     .order("fecha", { ascending: false });
 
     if (eVentas) {
       return NextResponse.json({ error: `Error ventas: ${eVentas.message}` }, { status: 500 });
