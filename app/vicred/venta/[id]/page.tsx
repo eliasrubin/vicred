@@ -83,7 +83,7 @@ export default function VentaDetallePage() {
         <Row label="Anticipo" value={formatMoney(venta?.anticipo)} />
         <Row label="Cantidad de cuotas" value={venta?.cuotas_cantidad ?? "-"} />
         <Row label="Comercio ID" value={venta?.comercio_id ?? "-"} />
-        <Row label="Primer vencimiento" value={formatDate(venta?.primer_vencimiento)} />
+        <Row label="Fecha de Compra" value={formatDate(venta?.primer_vencimiento)} />
         <Row label="Observación" value={venta?.observacion ?? "-"} />
       </Card>
 
