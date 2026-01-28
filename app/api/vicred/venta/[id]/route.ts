@@ -11,16 +11,27 @@ export async function GET(_: Request, ctx: { params: Promise<{ id: string }> }) 
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const jwtSecret = process.env.JWT_SECRET;
+
+  // ✅ Portal cliente usa ESTE secret
+  const jwtSecret = process.env.VICRED_JWT_SECRET;
 
   if (!url || !key) {
-    return NextResponse.json({ error: "Faltan variables de Supabase en el servidor" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Faltan variables de Supabase en el servidor" },
+      { status: 500 }
+    );
   }
   if (!jwtSecret) {
-    return NextResponse.json({ error: "Falta JWT_SECRET en el servidor" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Falta VICRED_JWT_SECRET en el servidor" },
+      { status: 500 }
+    );
   }
 
-  const token = (await cookies()).get("auth")?.value;
+  // ✅ Portal cliente usa ESTA cookie
+  const cookieStore = await cookies();
+  const token = cookieStore.get("vicred_session")?.value;
+
   if (!token) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
 
   let payload: any;
@@ -30,31 +41,38 @@ export async function GET(_: Request, ctx: { params: Promise<{ id: string }> }) 
     return NextResponse.json({ error: "No autorizado" }, { status: 401 });
   }
 
-  const dni = String(payload?.dni || "").replace(/\D/g, "");
-  if (!dni) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+  // ✅ En Vicred login guardamos cliente_id en el JWT
+  const cliente_id = payload?.cliente_id;
+  if (!cliente_id) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
 
   const supabase = createClient(url, key);
 
-  // Cliente
+  // 1) Cliente (por ID)
   const { data: cliente, error: eCliente } = await supabase
     .from("clientes")
-    .select("id, dni")
-    .eq("dni", dni)
+    .select("id, dni, nombre")
+    .eq("id", cliente_id)
     .maybeSingle();
 
-  if (eCliente || !cliente) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+  if (eCliente || !cliente) {
+    return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+  }
 
-  // Venta (debe pertenecer al cliente)
+  // 2) Venta (debe pertenecer al cliente)
   const { data: venta, error: eVenta } = await supabase
     .from("ventas_credito")
-    .select("id, fecha, total, anticipo, cuotas_cantidad, observacion, created_at, factura_numero, comercio_id, primer_vencimiento, cliente_id")
+    .select(
+      "id, fecha, total, anticipo, cuotas_cantidad, observacion, created_at, factura_numero, comercio_id, primer_vencimiento, cliente_id"
+    )
     .eq("id", id)
     .maybeSingle();
 
   if (eVenta) return NextResponse.json({ error: `Error venta: ${eVenta.message}` }, { status: 500 });
-  if (!venta || venta.cliente_id !== cliente.id) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+  if (!venta || venta.cliente_id !== cliente.id) {
+    return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+  }
 
-  // Cuotas de esa venta + fecha de pago si existe
+  // 3) Cuotas de esa venta
   const { data: cuotas, error: eCuotas } = await supabase
     .from("cuotas")
     .select("id, venta_id, cliente_id, nro, vencimiento, importe, pagado, estado")
@@ -67,6 +85,7 @@ export async function GET(_: Request, ctx: { params: Promise<{ id: string }> }) 
   const cuotasList = Array.isArray(cuotas) ? cuotas : [];
   const cuotaIds = cuotasList.map((c: any) => c.id);
 
+  // 4) Fecha de pago (si existe pagos_aplicaciones -> pagos)
   const pagosPorCuota: Record<string, any[]> = {};
   if (cuotaIds.length) {
     const { data: apps } = await supabase
@@ -89,6 +108,7 @@ export async function GET(_: Request, ctx: { params: Promise<{ id: string }> }) 
   });
 
   return NextResponse.json({
+    cliente: { id: cliente.id, dni: cliente.dni, nombre: cliente.nombre },
     venta: { ...venta, cliente_id: undefined }, // no hace falta exponerlo
     cuotas: cuotasEnriq,
   });
