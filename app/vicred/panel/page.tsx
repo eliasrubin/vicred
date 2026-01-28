@@ -80,7 +80,14 @@ export default function VicredPanelPage() {
         background: "#fff",
       }}
     >
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "baseline",
+          gap: 12,
+        }}
+      >
         <div style={{ fontSize: 16, fontWeight: 800 }}>{title}</div>
         {subtitle ? <div style={{ color: "#666", fontSize: 13 }}>{subtitle}</div> : null}
       </div>
@@ -188,12 +195,46 @@ export default function VicredPanelPage() {
     </div>
   );
 
-  // ✅ DISPONIBLE (la columna existe en vw_estado_credito)
-  const disponible = estado?.disponible ?? 0;
+  // ==========================
+  // ✅ Normalización del estado (para soportar distintos nombres de columnas de vw_estado_credito)
+  // ==========================
+  const disponible = Number(
+    estado?.disponible ?? estado?.available ?? 0
+  ) || 0;
 
-  // Opcionales (si existen en tu vista, los mostramos; si no existen, no molestan)
-  const limite = estado?.limite_credito ?? estado?.limite ?? null;
-  const usado = estado?.deuda_total ?? estado?.saldo_utilizado ?? estado?.usado ?? null;
+  const limite = Number(
+    estado?.limite ?? estado?.limite_total ?? estado?.limite_credito ?? estado?.credito_limite ?? 0
+  ) || 0;
+
+  const totalPagado = Number(
+    estado?.total_pagado ?? estado?.pagado_total ?? estado?.totalPagado ?? estado?.total_pagado_acumulado ?? 0
+  ) || 0;
+
+  // pendiente: preferimos total_pendiente, si no existe usamos deuda_total
+  const totalPendiente = Number(
+    estado?.total_pendiente ?? estado?.deuda_total ?? estado?.pendiente_total ?? estado?.totalPendiente ?? 0
+  ) || 0;
+
+  const proximoVencimiento =
+    estado?.proximo_vencimiento ??
+    estado?.proximo_venc ??
+    estado?.proximoVencimiento ??
+    null;
+
+  const cuotasPendCount =
+    estado?.cuotas_pendientes ?? estado?.cuotasPendientes ?? cuotasPendientes.length ?? 0;
+
+  // usado: si viene en la vista, lo respetamos; si no, lo calculamos.
+  const usadoRaw =
+    estado?.usado ??
+    estado?.saldo_utilizado ??
+    estado?.usado_total ??
+    estado?.deuda_total ??
+    null;
+
+  const usado = usadoRaw != null
+    ? Number(usadoRaw) || 0
+    : (limite ? Math.max(0, limite - disponible) : totalPendiente);
 
   return (
     <div style={{ maxWidth: 900, margin: "36px auto", padding: 16 }}>
@@ -208,26 +249,23 @@ export default function VicredPanelPage() {
         <Row label="Nº Vicred" value={cliente?.vicred_id || "-"} />
       </Card>
 
-      {/* ✅ NUEVO: Disponible para compras */}
+      {/* ✅ Disponible para compras */}
       <Card title="Disponible para compras">
         <div style={{ fontSize: 40, fontWeight: 900, letterSpacing: "-0.02em" }}>
           {formatMoney(disponible)}
         </div>
 
-        {(limite != null || usado != null) && (
+        {(limite !== 0 || usado !== 0) && (
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
-            {limite != null && (
-              <div style={{ padding: 14, border: "1px solid #eee", borderRadius: 12 }}>
-                <div style={{ color: "#666", fontSize: 13 }}>Límite</div>
-                <div style={{ fontSize: 20, fontWeight: 900 }}>{formatMoney(limite)}</div>
-              </div>
-            )}
-            {usado != null && (
-              <div style={{ padding: 14, border: "1px solid #eee", borderRadius: 12 }}>
-                <div style={{ color: "#666", fontSize: 13 }}>Usado</div>
-                <div style={{ fontSize: 20, fontWeight: 900 }}>{formatMoney(usado)}</div>
-              </div>
-            )}
+            <div style={{ padding: 14, border: "1px solid #eee", borderRadius: 12 }}>
+              <div style={{ color: "#666", fontSize: 13 }}>Límite</div>
+              <div style={{ fontSize: 20, fontWeight: 900 }}>{formatMoney(limite)}</div>
+            </div>
+
+            <div style={{ padding: 14, border: "1px solid #eee", borderRadius: 12 }}>
+              <div style={{ color: "#666", fontSize: 13 }}>Usado</div>
+              <div style={{ fontSize: 20, fontWeight: 900 }}>{formatMoney(usado)}</div>
+            </div>
           </div>
         )}
       </Card>
@@ -236,24 +274,22 @@ export default function VicredPanelPage() {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <div style={{ padding: 14, border: "1px solid #eee", borderRadius: 12 }}>
             <div style={{ color: "#666", fontSize: 13 }}>Total pagado</div>
-            <div style={{ fontSize: 22, fontWeight: 900 }}>{formatMoney(estado?.total_pagado)}</div>
+            <div style={{ fontSize: 22, fontWeight: 900 }}>{formatMoney(totalPagado)}</div>
           </div>
 
           <div style={{ padding: 14, border: "1px solid #eee", borderRadius: 12 }}>
             <div style={{ color: "#666", fontSize: 13 }}>Total pendiente</div>
-            <div style={{ fontSize: 22, fontWeight: 900 }}>{formatMoney(estado?.total_pendiente)}</div>
+            <div style={{ fontSize: 22, fontWeight: 900 }}>{formatMoney(totalPendiente)}</div>
           </div>
 
           <div style={{ padding: 14, border: "1px solid #eee", borderRadius: 12 }}>
             <div style={{ color: "#666", fontSize: 13 }}>Cuotas pendientes</div>
-            <div style={{ fontSize: 22, fontWeight: 900 }}>
-              {estado?.cuotas_pendientes ?? cuotasPendientes.length ?? 0}
-            </div>
+            <div style={{ fontSize: 22, fontWeight: 900 }}>{cuotasPendCount}</div>
           </div>
 
           <div style={{ padding: 14, border: "1px solid #eee", borderRadius: 12 }}>
             <div style={{ color: "#666", fontSize: 13 }}>Próximo vencimiento</div>
-            <div style={{ fontSize: 22, fontWeight: 900 }}>{formatDate(estado?.proximo_vencimiento)}</div>
+            <div style={{ fontSize: 22, fontWeight: 900 }}>{formatDate(proximoVencimiento)}</div>
           </div>
         </div>
       </Card>
