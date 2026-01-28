@@ -6,20 +6,12 @@ import { cookies } from "next/headers";
 import { createClient } from "@supabase/supabase-js";
 import jwt from "jsonwebtoken";
 
-type Estado = {
-  limite: number;
-  total_pagado: number;
-  total_pendiente: number;
-  disponible: number;
-  cuotas_pendientes: number;
-  cuotas_pagadas: number;
-  proximo_vencimiento: string | null;
-};
-
 export async function GET() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const jwtSecret = process.env.JWT_SECRET;
+
+  // ✅ Usamos el mismo secret que el login Vicred
+  const jwtSecret = process.env.VICRED_JWT_SECRET;
 
   if (!url || !key) {
     return NextResponse.json(
@@ -28,10 +20,15 @@ export async function GET() {
     );
   }
   if (!jwtSecret) {
-    return NextResponse.json({ error: "Falta JWT_SECRET en el servidor" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Falta VICRED_JWT_SECRET en el servidor" },
+      { status: 500 }
+    );
   }
 
-  const token = (await cookies()).get("auth")?.value;
+  // ✅ Usamos la cookie real del portal Vicred
+const cookieStore = await cookies();
+const token = cookieStore.get("vicred_session")?.value;
   if (!token) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
 
   let payload: any;
@@ -41,35 +38,26 @@ export async function GET() {
     return NextResponse.json({ error: "No autorizado" }, { status: 401 });
   }
 
-  const dni = String(payload?.dni || "").replace(/\D/g, "");
-  if (!dni) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+  const cliente_id = payload?.cliente_id;
+  if (!cliente_id) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
 
   const supabase = createClient(url, key);
 
-  // 1) Cliente
+  // 1) Cliente (por ID, que es lo que viene en el JWT)
   const { data: cliente, error: eCliente } = await supabase
     .from("clientes")
     .select("*")
-    .eq("dni", dni)
+    .eq("id", cliente_id)
     .maybeSingle();
 
   if (eCliente || !cliente) {
     return NextResponse.json({ error: "No autorizado" }, { status: 401 });
   }
 
-  // 2) Límite (cuentas_credito)
-  const { data: cuenta } = await supabase
-    .from("cuentas_credito")
-    .select("limite")
-    .eq("cliente_id", cliente.id)
-    .maybeSingle();
-
-  const limite = Number((cuenta as any)?.limite ?? 0) || 0;
-
-  // 3) Cuotas del cliente
+  // 2) Cuotas del cliente
   const { data: cuotasRaw, error: eCuotas } = await supabase
     .from("cuotas")
-    .select("id, venta_id, cliente_id, nro, vencimiento, importe, pagado, estado")
+    .select("id, venta_id, cliente_id, nro, vencimiento, importe, pagado, estado, factura_numero")
     .eq("cliente_id", cliente.id)
     .order("vencimiento", { ascending: true });
 
@@ -79,7 +67,7 @@ export async function GET() {
 
   const cuotas = Array.isArray(cuotasRaw) ? cuotasRaw : [];
 
-  // 4) Ventas vinculadas (solo columnas reales)
+  // 3) Ventas vinculadas
   const ventaIds = Array.from(new Set(cuotas.map((c: any) => c.venta_id).filter(Boolean)));
 
   const ventasById: Record<string, any> = {};
@@ -98,7 +86,7 @@ export async function GET() {
     });
   }
 
-  // 5) Fecha de pago (si existe modelo pagos_aplicaciones + pagos)
+  // 4) Fecha de pago (si existe pagos_aplicaciones + pagos)
   const cuotaIds = cuotas.map((c: any) => c.id);
   const pagosPorCuota: Record<string, any[]> = {};
 
@@ -108,7 +96,7 @@ export async function GET() {
       .select("id, cuota_id, pago_id, importe, pagos:pagos (id, fecha, importe)")
       .in("cuota_id", cuotaIds);
 
-    // Si falla (por relaciones/nombres), no rompemos el portal.
+    // Si falla (por relaciones/nombres), no rompemos el portal
     if (!eApps && Array.isArray(apps)) {
       for (const a of apps as any[]) {
         if (!pagosPorCuota[a.cuota_id]) pagosPorCuota[a.cuota_id] = [];
@@ -121,7 +109,7 @@ export async function GET() {
     }
   }
 
-  // 6) Cuotas enriquecidas
+  // 5) Cuotas enriquecidas
   const cuotasEnriquecidas = cuotas.map((c: any) => {
     const venta = ventasById[c.venta_id] || null;
     const pagos = pagosPorCuota[c.id] || [];
@@ -135,55 +123,30 @@ export async function GET() {
 
     return {
       ...c,
-      factura_numero: venta?.factura_numero ?? null,
+      factura_numero: c?.factura_numero ?? venta?.factura_numero ?? null,
       venta,
       pago_fecha: pagoFecha,
       pagos,
     };
   });
 
-  // 7) Estado (esto arregla tu “0”)
-  let totalPagado = 0;
-  let totalPendiente = 0;
-  let cuotasPendientes = 0;
-  let cuotasPagadas = 0;
-  let proximoVenc: string | null = null;
+  // ✅ 6) Estado desde la vista vw_estado_credito (fuente única de verdad)
+  const { data: estado, error: eEstado } = await supabase
+    .from("vw_estado_credito")
+    .select("*")
+    .eq("cliente_id", cliente.id)
+    .maybeSingle();
 
-  for (const c of cuotasEnriquecidas as any[]) {
-    const importe = Number(c.importe ?? 0) || 0;
-    const pagado = Number(c.pagado ?? 0) || 0;
-
-    const pendiente = Math.max(0, importe - pagado);
-
-    totalPagado += Math.min(importe, pagado);
-    totalPendiente += pendiente;
-
-    const est = String(c.estado || "").toUpperCase();
-    const esPagada = est === "PAGADA" || pendiente === 0;
-
-    if (esPagada) cuotasPagadas += 1;
-    else {
-      cuotasPendientes += 1;
-      const v = c.vencimiento ? String(c.vencimiento).slice(0, 10) : null;
-      if (v && (!proximoVenc || v < proximoVenc)) proximoVenc = v;
-    }
+  if (eEstado) {
+    return NextResponse.json(
+      { error: `Error estado crédito: ${eEstado.message}` },
+      { status: 500 }
+    );
   }
-
-  const disponible = Math.max(0, limite - totalPendiente);
-
-  const estado: Estado = {
-    limite,
-    total_pagado: totalPagado,
-    total_pendiente: totalPendiente,
-    disponible,
-    cuotas_pendientes: cuotasPendientes,
-    cuotas_pagadas: cuotasPagadas,
-    proximo_vencimiento: proximoVenc,
-  };
 
   return NextResponse.json({
     cliente,
-    estado,
+    estado: estado ?? {},
     cuotas: cuotasEnriquecidas,
   });
 }
