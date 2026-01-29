@@ -42,7 +42,7 @@ export default function NuevoPagoClient() {
   // leer parámetros una vez
   useEffect(() => {
     const qClienteId = sp.get("clienteId") || "";
-    const qVentaId = sp.get("ventaId") || "";
+    const qVentaId = sp.get("ventaId") || sp.get("ventalId") || "";
     const qMonto = sp.get("monto") || "";
     const qCuota = sp.get("cuota") || "";
 
