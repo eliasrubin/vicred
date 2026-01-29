@@ -14,6 +14,7 @@ type Venta = {
   saldo_pendiente: number;
   comercio_codigo?: string | null;
   comercio_nombre?: string | null;
+  cliente_id?: string;
 };
 
 export default function NuevoPagoClient() {
@@ -34,11 +35,11 @@ export default function NuevoPagoClient() {
   const [ok, setOk] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // para no pisar valores que vienen desde cuotas
+  // para no pisar el ventaId precargado
   const prefVentaIdRef = useRef<string>("");
   const prefClienteIdRef = useRef<string>("");
 
-  // leer params (cuando viene desde cuota)
+  // leer parámetros una vez
   useEffect(() => {
     const qClienteId = sp.get("clienteId") || "";
     const qVentaId = sp.get("ventaId") || "";
@@ -53,7 +54,7 @@ export default function NuevoPagoClient() {
     if (qMonto) setMonto(qMonto);
 
     if (qCuota) {
-      setOk(`🧾 Cobranza sugerida: cuota ${qCuota}. (FIFO si hay anteriores)`);
+      setOk(`🧾 Cobranza sugerida: cuota ${qCuota}. (FIFO si hay anteriores pendientes)`);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -61,6 +62,7 @@ export default function NuevoPagoClient() {
   // cargar clientes
   useEffect(() => {
     (async () => {
+      setErr(null);
       const { data, error } = await supabase
         .from("clientes")
         .select("id,nombre,dni")
@@ -81,33 +83,35 @@ export default function NuevoPagoClient() {
     }
 
     (async () => {
+      setErr(null);
+
       const { data, error } = await supabase
         .from("vw_ventas_saldo")
         .select("id,fecha,total,factura_numero,saldo_pendiente,comercio_codigo,comercio_nombre,cliente_id")
         .eq("cliente_id", clienteId)
-        .order("fecha", { ascending: false });
+        .order("fecha", { ascending: false })
+        .limit(200);
 
       if (error) throw error;
 
       const abiertas = (data || []).filter((v: any) => Number(v.saldo_pendiente) > 0);
       setVentas(abiertas as any);
 
-      const vieneDeCuota =
-        prefClienteIdRef.current === clienteId && !!prefVentaIdRef.current;
+      // NO pisar ventaId si viene preseleccionado por URL para este mismo cliente
+      const prefCliente = prefClienteIdRef.current;
+      const prefVenta = prefVentaIdRef.current;
+      const vieneDeCuota = !!prefCliente && !!prefVenta && prefCliente === clienteId;
 
       if (!vieneDeCuota) {
         setVentaId("");
       } else {
-        const existe = abiertas.some((x: any) => x.id === prefVentaIdRef.current);
+        const existe = abiertas.some((x: any) => x.id === prefVenta);
         if (!existe) setVentaId("");
       }
     })().catch((e) => setErr(e.message ?? String(e)));
   }, [clienteId]);
 
-  const ventaSel = useMemo(
-    () => ventas.find((v) => v.id === ventaId) || null,
-    [ventas, ventaId]
-  );
+  const ventaSel = useMemo(() => ventas.find((v) => v.id === ventaId) || null, [ventas, ventaId]);
 
   const guardar = async () => {
     setErr(null);
@@ -116,21 +120,16 @@ export default function NuevoPagoClient() {
     if (!clienteId) return setErr("Seleccioná un cliente.");
 
     const nMonto = Number(monto);
-    if (!Number.isFinite(nMonto) || nMonto <= 0)
-      return setErr("Monto inválido.");
+    if (!Number.isFinite(nMonto) || nMonto <= 0) return setErr("Monto inválido.");
 
     setLoading(true);
     try {
       if (ventaId) {
-        const { data } = await supabase
-          .from("vw_ventas_saldo")
-          .select("saldo_pendiente")
-          .eq("id", ventaId)
-          .single();
+        const { data, error } = await supabase.from("vw_ventas_saldo").select("saldo_pendiente").eq("id", ventaId).single();
+        if (error) throw error;
 
         if (!data || Number(data.saldo_pendiente) <= 0) {
-          setLoading(false);
-          return setErr("La factura ya está cancelada.");
+          return setErr("Esa factura ya está cancelada. Elegí otra o dejá pago general.");
         }
       }
 
@@ -147,78 +146,203 @@ export default function NuevoPagoClient() {
         .single();
 
       if (error) throw error;
+      if (!data?.id) throw new Error("No se pudo obtener el ID del pago.");
 
       router.push(`/pagos/${data.id}/comprobante?print=1`);
     } catch (e: any) {
-      setErr(e.message ?? String(e));
+      setErr(e?.message ?? String(e));
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <main style={{ maxWidth: 800, margin: "30px auto", fontFamily: "system-ui" }}>
-      <h2>Registrar pago</h2>
+    <main style={styles.page}>
+      {/* Header */}
+      <div style={styles.header}>
+        <div>
+          <h2 style={{ margin: 0 }}>Registrar pago</h2>
+          <div style={{ opacity: 0.7, marginTop: 4, fontSize: 13 }}>
+            Registrá la cobranza y se aplica FIFO (general o por factura) según selección.
+          </div>
+        </div>
 
-      {err && <p style={{ color: "crimson" }}>{err}</p>}
-      {ok && <p style={{ color: "green" }}>{ok}</p>}
+        <div style={styles.headerActions}>
+          <button style={styles.btn} onClick={() => router.push("/pagos/historial")}>
+            Historial
+          </button>
+          <button style={styles.btn} onClick={() => router.push("/clientes")}>
+            Volver
+          </button>
+        </div>
+      </div>
 
-      <label>Cliente</label>
-      <select
-        value={clienteId}
-        onChange={(e) => {
-          prefClienteIdRef.current = "";
-          prefVentaIdRef.current = "";
-          setClienteId(e.target.value);
-          setVentaId("");
-        }}
-      >
-        <option value="">Seleccionar...</option>
-        {clientes.map((c) => (
-          <option key={c.id} value={c.id}>
-            {c.nombre} {c.dni ? `(${c.dni})` : ""}
-          </option>
-        ))}
-      </select>
+      {/* Messages */}
+      {err && <div style={{ ...styles.alert, ...styles.alertErr }}>{err}</div>}
+      {ok && <div style={{ ...styles.alert, ...styles.alertOk }}>{ok}</div>}
 
-      <label>Factura</label>
-      <select
-        value={ventaId}
-        onChange={(e) => setVentaId(e.target.value)}
-      >
-        <option value="">Pago general (FIFO)</option>
-        {ventas.map((v) => (
-          <option key={v.id} value={v.id}>
-            {v.factura_numero ?? v.id.slice(0, 8)} · Saldo $
-            {Number(v.saldo_pendiente).toFixed(2)}
-          </option>
-        ))}
-      </select>
+      {/* Card */}
+      <section style={styles.card}>
+        <div style={styles.grid}>
+          {/* Cliente */}
+          <div style={{ gridColumn: "1 / -1" }}>
+            <label style={styles.label}>Cliente</label>
+            <select
+              value={clienteId}
+              onChange={(e) => {
+                prefClienteIdRef.current = "";
+                prefVentaIdRef.current = "";
+                setClienteId(e.target.value);
+                setVentaId("");
+              }}
+              style={styles.input}
+            >
+              <option value="">Seleccionar...</option>
+              {clientes.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.nombre} {c.dni ? `(${c.dni})` : ""}
+                </option>
+              ))}
+            </select>
+          </div>
 
-      {ventaSel && (
-        <p>
-          <b>Comercio:</b> {ventaSel.comercio_codigo} ·{" "}
-          {ventaSel.comercio_nombre}
-        </p>
-      )}
+          {/* Factura */}
+          <div style={{ gridColumn: "1 / -1" }}>
+            <label style={styles.label}>Aplicar pago a factura (opcional)</label>
+            <select value={ventaId} onChange={(e) => setVentaId(e.target.value)} style={styles.input} disabled={!clienteId}>
+              <option value="">(Pago general al cliente - FIFO)</option>
+              {ventas.length === 0 && clienteId ? (
+                <option value="" disabled>
+                  (No hay facturas con saldo pendiente)
+                </option>
+              ) : null}
 
-      <label>Monto</label>
-      <input value={monto} onChange={(e) => setMonto(e.target.value)} />
+              {ventas.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {(v.factura_numero ? `Factura ${v.factura_numero}` : `Venta ${v.id.slice(0, 8)}`)}
+                  {v.comercio_codigo ? ` · ${v.comercio_codigo}` : ""}
+                  {" · "}
+                  {v.fecha}
+                  {" · "}
+                  Saldo: ${Number(v.saldo_pendiente).toFixed(2)}
+                </option>
+              ))}
+            </select>
 
-      <label>Método</label>
-      <select value={metodo} onChange={(e) => setMetodo(e.target.value)}>
-        <option value="EFECTIVO">EFECTIVO</option>
-        <option value="TRANSFERENCIA">TRANSFERENCIA</option>
-        <option value="MIXTO">MIXTO</option>
-        <option value="OTRO">OTRO</option>
-      </select>
+            {ventaSel && (
+              <div style={{ marginTop: 8, fontSize: 13, opacity: 0.85 }}>
+                <b>Comercio:</b> {ventaSel.comercio_codigo ? `${ventaSel.comercio_codigo} · ` : ""}
+                {ventaSel.comercio_nombre ?? "-"}
+              </div>
+            )}
+          </div>
 
-      <label>Referencia</label>
-      <input value={ref} onChange={(e) => setRef(e.target.value)} />
+          {/* Monto */}
+          <div>
+            <label style={styles.label}>Monto</label>
+            <input value={monto} onChange={(e) => setMonto(e.target.value)} inputMode="decimal" placeholder="Ej: 150000" style={styles.input} />
+          </div>
 
-      <button onClick={guardar} disabled={loading}>
-        {loading ? "Guardando..." : "Guardar pago"}
-      </button>
+          {/* Metodo */}
+          <div>
+            <label style={styles.label}>Método</label>
+            <select value={metodo} onChange={(e) => setMetodo(e.target.value)} style={styles.input}>
+              <option value="EFECTIVO">EFECTIVO</option>
+              <option value="TRANSFERENCIA">TRANSFERENCIA</option>
+              <option value="MIXTO">MIXTO</option>
+              <option value="OTRO">OTRO</option>
+            </select>
+          </div>
+
+          {/* Referencia */}
+          <div style={{ gridColumn: "1 / -1" }}>
+            <label style={styles.label}>Referencia (opcional)</label>
+            <input value={ref} onChange={(e) => setRef(e.target.value)} placeholder="Ej: transferencia, nro ticket, etc." style={styles.input} />
+          </div>
+        </div>
+
+        <button onClick={guardar} disabled={loading} style={{ ...styles.primary, opacity: loading ? 0.7 : 1 }}>
+          {loading ? "Guardando..." : "Guardar pago y generar comprobante"}
+        </button>
+      </section>
     </main>
   );
 }
+
+const styles: Record<string, React.CSSProperties> = {
+  page: {
+    maxWidth: 900,
+    margin: "28px auto",
+    padding: "0 14px",
+    fontFamily: "system-ui",
+  },
+  header: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 12,
+    flexWrap: "wrap",
+    marginBottom: 14,
+  },
+  headerActions: { display: "flex", gap: 10 },
+  btn: {
+    padding: "10px 12px",
+    border: "1px solid #ddd",
+    borderRadius: 10,
+    background: "white",
+    cursor: "pointer",
+  },
+  card: {
+    border: "1px solid #eee",
+    borderRadius: 14,
+    padding: 16,
+    background: "white",
+  },
+  grid: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: 14,
+  },
+  label: {
+    display: "block",
+    fontSize: 13,
+    opacity: 0.8,
+    marginBottom: 6,
+  },
+  input: {
+    width: "100%",
+    padding: "12px 12px",
+    borderRadius: 12,
+    border: "1px solid #ddd",
+    outline: "none",
+    fontSize: 14,
+  },
+  primary: {
+    marginTop: 14,
+    padding: 14,
+    width: "100%",
+    borderRadius: 12,
+    border: "1px solid #111",
+    background: "#111",
+    color: "white",
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  alert: {
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+    border: "1px solid #eee",
+    fontSize: 14,
+  },
+  alertErr: {
+    borderColor: "#f2b8b8",
+    background: "#fff5f5",
+    color: "#a40000",
+  },
+  alertOk: {
+    borderColor: "#bfe8c7",
+    background: "#f3fff5",
+    color: "#1b6b2a",
+  },
+};
