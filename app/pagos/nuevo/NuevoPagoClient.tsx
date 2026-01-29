@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "../../../lib/supabaseClient";
 
@@ -35,13 +35,16 @@ export default function NuevoPagoClient() {
   const [ok, setOk] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // para no pisar el ventaId precargado
+  // ✅ para no pisar lo que viene precargado por URL
   const prefVentaIdRef = useRef<string>("");
   const prefClienteIdRef = useRef<string>("");
+  const didApplyPrefRef = useRef(false); // ✅ aplicar una sola vez
 
-  // leer parámetros una vez
+  // ✅ leer parámetros una vez
   useEffect(() => {
-    const qClienteId = sp.get("clienteId") || "";
+    // ✅ acepta clienteId o clienteld (typo común)
+    const qClienteId = sp.get("clienteId") || sp.get("clienteld") || "";
+    // ✅ acepta ventaId o ventalId (typo común)
     const qVentaId = sp.get("ventaId") || sp.get("ventalId") || "";
     const qMonto = sp.get("monto") || "";
     const qCuota = sp.get("cuota") || "";
@@ -59,7 +62,7 @@ export default function NuevoPagoClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // cargar clientes
+  // ✅ cargar clientes
   useEffect(() => {
     (async () => {
       setErr(null);
@@ -74,11 +77,12 @@ export default function NuevoPagoClient() {
     })().catch((e) => setErr(e.message ?? String(e)));
   }, []);
 
-  // cargar ventas abiertas del cliente
+  // ✅ cargar ventas abiertas del cliente
   useEffect(() => {
     if (!clienteId) {
       setVentas([]);
-      setVentaId("");
+      // 👇 IMPORTANTE: no limpies ventaId si venimos desde URL (sino se pierde la preselección)
+      if (!prefClienteIdRef.current) setVentaId("");
       return;
     }
 
@@ -97,18 +101,33 @@ export default function NuevoPagoClient() {
       const abiertas = (data || []).filter((v: any) => Number(v.saldo_pendiente) > 0);
       setVentas(abiertas as any);
 
-      // NO pisar ventaId si viene preseleccionado por URL para este mismo cliente
       const prefCliente = prefClienteIdRef.current;
       const prefVenta = prefVentaIdRef.current;
-      const vieneDeCuota = !!prefCliente && !!prefVenta && prefCliente === clienteId;
+
+      const vieneDeCuota = !!prefCliente && prefCliente === clienteId && !!prefVenta;
 
       if (!vieneDeCuota) {
+        // selección normal (manual)
         setVentaId("");
+        return;
+      }
+
+      // ✅ si venimos por URL, forzamos la preselección 1 vez (si existe dentro de las abiertas)
+      const existe = abiertas.some((x: any) => x.id === prefVenta);
+      if (!existe) {
+        setVentaId("");
+        return;
+      }
+
+      if (!didApplyPrefRef.current) {
+        didApplyPrefRef.current = true;
+        setVentaId(prefVenta);
       } else {
-        const existe = abiertas.some((x: any) => x.id === prefVenta);
-        if (!existe) setVentaId("");
+        // si por algún motivo quedó en "", la volvemos a aplicar
+        if (!ventaId) setVentaId(prefVenta);
       }
     })().catch((e) => setErr(e.message ?? String(e)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clienteId]);
 
   const ventaSel = useMemo(() => ventas.find((v) => v.id === ventaId) || null, [ventas, ventaId]);
@@ -125,7 +144,11 @@ export default function NuevoPagoClient() {
     setLoading(true);
     try {
       if (ventaId) {
-        const { data, error } = await supabase.from("vw_ventas_saldo").select("saldo_pendiente").eq("id", ventaId).single();
+        const { data, error } = await supabase
+          .from("vw_ventas_saldo")
+          .select("saldo_pendiente")
+          .eq("id", ventaId)
+          .single();
         if (error) throw error;
 
         if (!data || Number(data.saldo_pendiente) <= 0) {
@@ -158,7 +181,6 @@ export default function NuevoPagoClient() {
 
   return (
     <main style={styles.page}>
-      {/* Header */}
       <div style={styles.header}>
         <div>
           <h2 style={{ margin: 0 }}>Registrar pago</h2>
@@ -177,21 +199,20 @@ export default function NuevoPagoClient() {
         </div>
       </div>
 
-      {/* Messages */}
       {err && <div style={{ ...styles.alert, ...styles.alertErr }}>{err}</div>}
       {ok && <div style={{ ...styles.alert, ...styles.alertOk }}>{ok}</div>}
 
-      {/* Card */}
       <section style={styles.card}>
         <div style={styles.grid}>
-          {/* Cliente */}
           <div style={{ gridColumn: "1 / -1" }}>
             <label style={styles.label}>Cliente</label>
             <select
               value={clienteId}
               onChange={(e) => {
+                // al elegir manualmente, borro preferencias de URL
                 prefClienteIdRef.current = "";
                 prefVentaIdRef.current = "";
+                didApplyPrefRef.current = false;
                 setClienteId(e.target.value);
                 setVentaId("");
               }}
@@ -206,11 +227,11 @@ export default function NuevoPagoClient() {
             </select>
           </div>
 
-          {/* Factura */}
           <div style={{ gridColumn: "1 / -1" }}>
             <label style={styles.label}>Aplicar pago a factura (opcional)</label>
             <select value={ventaId} onChange={(e) => setVentaId(e.target.value)} style={styles.input} disabled={!clienteId}>
               <option value="">(Pago general al cliente - FIFO)</option>
+
               {ventas.length === 0 && clienteId ? (
                 <option value="" disabled>
                   (No hay facturas con saldo pendiente)
@@ -219,7 +240,7 @@ export default function NuevoPagoClient() {
 
               {ventas.map((v) => (
                 <option key={v.id} value={v.id}>
-                  {(v.factura_numero ? `Factura ${v.factura_numero}` : `Venta ${v.id.slice(0, 8)}`)}
+                  {v.factura_numero ? `Factura ${v.factura_numero}` : `Venta ${v.id.slice(0, 8)}`}
                   {v.comercio_codigo ? ` · ${v.comercio_codigo}` : ""}
                   {" · "}
                   {v.fecha}
@@ -237,13 +258,17 @@ export default function NuevoPagoClient() {
             )}
           </div>
 
-          {/* Monto */}
           <div>
             <label style={styles.label}>Monto</label>
-            <input value={monto} onChange={(e) => setMonto(e.target.value)} inputMode="decimal" placeholder="Ej: 150000" style={styles.input} />
+            <input
+              value={monto}
+              onChange={(e) => setMonto(e.target.value)}
+              inputMode="decimal"
+              placeholder="Ej: 150000"
+              style={styles.input}
+            />
           </div>
 
-          {/* Metodo */}
           <div>
             <label style={styles.label}>Método</label>
             <select value={metodo} onChange={(e) => setMetodo(e.target.value)} style={styles.input}>
@@ -254,10 +279,14 @@ export default function NuevoPagoClient() {
             </select>
           </div>
 
-          {/* Referencia */}
           <div style={{ gridColumn: "1 / -1" }}>
             <label style={styles.label}>Referencia (opcional)</label>
-            <input value={ref} onChange={(e) => setRef(e.target.value)} placeholder="Ej: transferencia, nro ticket, etc." style={styles.input} />
+            <input
+              value={ref}
+              onChange={(e) => setRef(e.target.value)}
+              placeholder="Ej: transferencia, nro ticket, etc."
+              style={styles.input}
+            />
           </div>
         </div>
 
