@@ -29,6 +29,7 @@ function upper(x: any) {
 export default function VicredPanelPage() {
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
+  const [ok, setOk] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/vicred/me", { cache: "no-store" })
@@ -94,6 +95,26 @@ export default function VicredPanelPage() {
 
   const waLinkContacto = `https://wa.me/${WA_NUMBER}?text=${encodeURIComponent(waMsgContacto)}`;
   const waLinkInformarPago = `https://wa.me/${WA_NUMBER}?text=${encodeURIComponent(waMsgInformarPago)}`;
+
+  // ==========================
+  // ✅ Datos bancarios (Vicred)
+  // ==========================
+  const DATOS_BANCO = {
+    alias: "vicred",
+    cbu: "0930322320100274643261",
+    titular: "Maldonado Florencia Noely",
+    banco: "Banco de La Pampa",
+  };
+
+  const copiar = async (texto: string) => {
+    try {
+      await navigator.clipboard.writeText(texto);
+      setOk("✅ Copiado al portapapeles.");
+      setTimeout(() => setOk(null), 2500);
+    } catch {
+      setError("No se pudo copiar. (Probá copiar manualmente).");
+    }
+  };
 
   const Card = ({ title, subtitle, children }: any) => (
     <div
@@ -222,8 +243,7 @@ export default function VicredPanelPage() {
 
   const usadoRaw = estado?.usado ?? estado?.saldo_utilizado ?? estado?.usado_total ?? estado?.deuda_total ?? null;
 
-  const usado =
-    usadoRaw != null ? Number(usadoRaw) || 0 : limite ? Math.max(0, limite - disponible) : totalPendiente;
+  const usado = usadoRaw != null ? Number(usadoRaw) || 0 : limite ? Math.max(0, limite - disponible) : totalPendiente;
 
   // ==========================
   // ✅ Próximo vencimiento
@@ -260,6 +280,23 @@ export default function VicredPanelPage() {
     <div style={{ maxWidth: 900, margin: "36px auto", padding: 16 }}>
       <h1 style={{ margin: 0 }}>VICRED — Portal Cliente</h1>
       <p style={{ marginTop: 8, color: "#666" }}>Acá podés ver tu estado, tus cuotas pendientes y tus cuotas pagadas.</p>
+
+      {/* ✅ mensaje de copiado */}
+      {ok ? (
+        <div
+          style={{
+            marginTop: 12,
+            padding: 12,
+            border: "1px solid #bfe8c7",
+            background: "#f3fff5",
+            color: "#1b6b2a",
+            borderRadius: 12,
+            fontWeight: 700,
+          }}
+        >
+          {ok}
+        </div>
+      ) : null}
 
       <Card title="Cliente">
         <Row label="Nombre" value={cliente?.nombre || "-"} />
@@ -305,6 +342,68 @@ export default function VicredPanelPage() {
           <div style={{ padding: 14, border: "1px solid #eee", borderRadius: 12 }}>
             <div style={{ color: "#666", fontSize: 13 }}>Monto próximo venc.</div>
             <div style={{ fontSize: 22, fontWeight: 900 }}>{formatMoney(montoProximoVenc)}</div>
+          </div>
+        </div>
+      </Card>
+
+      {/* ✅ NUEVO: Datos para transferencia */}
+      <Card title="Datos para transferencia" subtitle="Pagos por transferencia bancaria">
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div style={{ padding: 14, border: "1px solid #eee", borderRadius: 12 }}>
+            <div style={{ color: "#666", fontSize: 13 }}>Alias</div>
+            <div style={{ fontSize: 18, fontWeight: 900, marginTop: 6 }}>{DATOS_BANCO.alias}</div>
+            <button
+              onClick={() => copiar(DATOS_BANCO.alias)}
+              style={{
+                marginTop: 10,
+                padding: "10px 12px",
+                borderRadius: 10,
+                border: "1px solid #ddd",
+                background: "#fff",
+                cursor: "pointer",
+                fontWeight: 800,
+                width: "100%",
+              }}
+            >
+              Copiar alias
+            </button>
+          </div>
+
+          <div style={{ padding: 14, border: "1px solid #eee", borderRadius: 12 }}>
+            <div style={{ color: "#666", fontSize: 13 }}>CBU</div>
+            <div style={{ fontSize: 18, fontWeight: 900, marginTop: 6, wordBreak: "break-all" }}>{DATOS_BANCO.cbu}</div>
+            <button
+              onClick={() => copiar(DATOS_BANCO.cbu)}
+              style={{
+                marginTop: 10,
+                padding: "10px 12px",
+                borderRadius: 10,
+                border: "1px solid #ddd",
+                background: "#fff",
+                cursor: "pointer",
+                fontWeight: 800,
+                width: "100%",
+              }}
+            >
+              Copiar CBU
+            </button>
+          </div>
+
+          <div style={{ gridColumn: "1 / -1", padding: 14, border: "1px solid #eee", borderRadius: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div>
+                <div style={{ color: "#666", fontSize: 13 }}>Titular</div>
+                <div style={{ fontSize: 16, fontWeight: 900, marginTop: 6 }}>{DATOS_BANCO.titular}</div>
+              </div>
+              <div>
+                <div style={{ color: "#666", fontSize: 13 }}>Banco</div>
+                <div style={{ fontSize: 16, fontWeight: 900, marginTop: 6 }}>{DATOS_BANCO.banco}</div>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 10, color: "#666", fontSize: 13, lineHeight: 1.4 }}>
+              Una vez realizada la transferencia, tocá <b>“Informar pago por WhatsApp”</b> y adjuntá el comprobante.
+            </div>
           </div>
         </div>
       </Card>
