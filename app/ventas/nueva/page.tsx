@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../../../lib/supabaseClient";
 import { useRouter } from "next/navigation";
 
@@ -14,12 +14,6 @@ type Estado = {
   bloqueado_por_mora: boolean;
 };
 
-function addDays(iso: string, days: number) {
-  const d = new Date(iso + "T00:00:00");
-  d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
 export default function NuevaVentaPage() {
   const router = useRouter();
 
@@ -29,12 +23,12 @@ export default function NuevaVentaPage() {
 
   const [clienteId, setClienteId] = useState("");
   const [comercioId, setComercioId] = useState<number | "">("");
-
-  // ✅ Fecha de venta automática (hoy)
-  const [fecha] = useState(() => new Date().toISOString().slice(0, 10));
-
-  // ✅ Primer vencimiento (default +30 días)
-  const [primerVencimiento, setPrimerVencimiento] = useState(() => addDays(new Date().toISOString().slice(0, 10), 30));
+  const [fecha, setFecha] = useState(() => new Date().toISOString().slice(0, 10));
+  const [primerVenc, setPrimerVenc] = useState(() => {
+    const d = new Date();
+    d.setMonth(d.getMonth() + 1);
+    return d.toISOString().slice(0, 10);
+  });
 
   const [factura, setFactura] = useState("");
   const [total, setTotal] = useState("");
@@ -45,7 +39,13 @@ export default function NuevaVentaPage() {
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
+  // 🔎 buscador cliente
+  const [qCliente, setQCliente] = useState("");
+  const [openClientes, setOpenClientes] = useState(false);
+  const boxRef = useRef<HTMLDivElement | null>(null);
+
   const estadoSel = useMemo(() => (clienteId ? estados[clienteId] : null), [clienteId, estados]);
+  const clienteSel = useMemo(() => clientes.find((c) => c.id === clienteId) || null, [clientes, clienteId]);
 
   useEffect(() => {
     (async () => {
@@ -55,7 +55,8 @@ export default function NuevaVentaPage() {
         .from("clientes")
         .select("id,nombre,dni")
         .order("nombre", { ascending: true })
-        .limit(500);
+        .limit(2000);
+
       if (cErr) throw cErr;
       setClientes((c as any) || []);
 
@@ -65,11 +66,41 @@ export default function NuevaVentaPage() {
 
       const { data: e, error: eErr } = await supabase.from("vw_estado_credito").select("*");
       if (eErr) throw eErr;
+
       const map: Record<string, Estado> = {};
       (e || []).forEach((x: any) => (map[x.cliente_id] = x));
       setEstados(map);
     })().catch((e) => setErr(e.message ?? String(e)));
   }, []);
+
+  // cerrar dropdown al click afuera
+  useEffect(() => {
+    const onDown = (ev: MouseEvent) => {
+      if (!boxRef.current) return;
+      if (!boxRef.current.contains(ev.target as any)) setOpenClientes(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, []);
+
+  const clientesFiltrados = useMemo(() => {
+    const s = qCliente.trim().toLowerCase();
+    if (!s) return clientes.slice(0, 50);
+
+    const out = clientes.filter((c) => {
+      const nombre = (c.nombre ?? "").toLowerCase();
+      const dni = (c.dni ?? "").toLowerCase();
+      return nombre.includes(s) || dni.includes(s);
+    });
+
+    return out.slice(0, 50);
+  }, [qCliente, clientes]);
+
+  const selectCliente = (c: Cliente) => {
+    setClienteId(c.id);
+    setQCliente(`${c.nombre}${c.dni ? ` (${c.dni})` : ""}`);
+    setOpenClientes(false);
+  };
 
   const crearVenta = async () => {
     setErr(null);
@@ -77,9 +108,6 @@ export default function NuevaVentaPage() {
 
     if (!clienteId) return setErr("Seleccioná un cliente.");
     if (!comercioId) return setErr("Seleccioná un comercio.");
-
-    if (!primerVencimiento) return setErr("Seleccioná el primer vencimiento.");
-    if (primerVencimiento < fecha) return setErr("El primer vencimiento no puede ser anterior a la fecha de venta.");
 
     const nTotal = Number(total);
     const nAnt = Number(anticipo);
@@ -104,8 +132,8 @@ export default function NuevaVentaPage() {
       .insert({
         cliente_id: clienteId,
         comercio_id: comercioId,
-        fecha, // ✅ fecha venta automática
-        primer_vencimiento: primerVencimiento, // ✅ nuevo: desde acá corren cuotas
+        fecha,
+        primer_vencimiento: primerVenc,
         factura_numero: factura.trim() || null,
         total: nTotal,
         anticipo: nAnt,
@@ -118,14 +146,6 @@ export default function NuevaVentaPage() {
     if (error) return setErr(error.message);
 
     setMsg("✅ Venta creada. Cuotas generadas automáticamente.");
-
-    // refrescar estados
-    const { data: e } = await supabase.from("vw_estado_credito").select("*");
-    const map: Record<string, Estado> = {};
-    (e || []).forEach((x: any) => (map[x.cliente_id] = x));
-    setEstados(map);
-
-    // ir al cliente
     router.push(`/clientes/${clienteId}`);
   };
 
@@ -140,16 +160,62 @@ export default function NuevaVentaPage() {
       {msg && <p style={{ color: "green" }}>{msg}</p>}
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 12 }}>
-        <div>
+        {/* Cliente con buscador */}
+        <div ref={boxRef}>
           <label>Cliente</label>
-          <select value={clienteId} onChange={(e) => setClienteId(e.target.value)} style={{ width: "100%", padding: 10, marginTop: 6 }}>
-            <option value="">Seleccionar...</option>
-            {clientes.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.nombre} {c.dni ? `(${c.dni})` : ""}
-              </option>
-            ))}
-          </select>
+
+          <input
+            value={qCliente}
+            onChange={(e) => {
+              setQCliente(e.target.value);
+              setOpenClientes(true);
+              // si empieza a tipear distinto al seleccionado, limpiamos selección
+              if (clienteSel && e.target.value.trim() !== `${clienteSel.nombre}${clienteSel.dni ? ` (${clienteSel.dni})` : ""}`) {
+                setClienteId("");
+              }
+            }}
+            onFocus={() => setOpenClientes(true)}
+            placeholder="Buscar por nombre o DNI..."
+            style={{ width: "100%", padding: 10, marginTop: 6, borderRadius: 10, border: "1px solid #ddd" }}
+          />
+
+          {openClientes && (
+            <div
+              style={{
+                marginTop: 6,
+                border: "1px solid #e5e5e5",
+                borderRadius: 12,
+                background: "white",
+                boxShadow: "0 14px 30px rgba(0,0,0,0.08)",
+                maxHeight: 320,
+                overflow: "auto",
+              }}
+            >
+              {clientesFiltrados.length === 0 ? (
+                <div style={{ padding: 12, opacity: 0.7 }}>(Sin resultados)</div>
+              ) : (
+                clientesFiltrados.map((c) => (
+                  <button
+                    key={c.id}
+                    onClick={() => selectCliente(c)}
+                    style={{
+                      width: "100%",
+                      textAlign: "left",
+                      padding: 12,
+                      border: "none",
+                      background: "transparent",
+                      cursor: "pointer",
+                      borderBottom: "1px solid #f0f0f0",
+                    }}
+                  >
+                    <div style={{ fontWeight: 700 }}>{c.nombre}</div>
+                    <div style={{ fontSize: 12, opacity: 0.75 }}>{c.dni ? `DNI: ${c.dni}` : "DNI: -"}</div>
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+
           {estadoSel && (
             <p style={{ marginTop: 8, opacity: 0.8 }}>
               Límite: {Number(estadoSel.limite_total).toFixed(2)} · Deuda: {Number(estadoSel.deuda_total).toFixed(2)} · Disponible:{" "}
@@ -176,14 +242,14 @@ export default function NuevaVentaPage() {
 
         <div>
           <label>Fecha de venta</label>
-          <input value={fecha} type="date" readOnly style={{ width: "100%", padding: 10, marginTop: 6, opacity: 0.85 }} />
+          <input value={fecha} onChange={(e) => setFecha(e.target.value)} type="date" style={{ width: "100%", padding: 10, marginTop: 6 }} />
         </div>
 
         <div>
           <label>Primer vencimiento</label>
           <input
-            value={primerVencimiento}
-            onChange={(e) => setPrimerVencimiento(e.target.value)}
+            value={primerVenc}
+            onChange={(e) => setPrimerVenc(e.target.value)}
             type="date"
             style={{ width: "100%", padding: 10, marginTop: 6 }}
           />
@@ -226,4 +292,3 @@ export default function NuevaVentaPage() {
     </main>
   );
 }
-
