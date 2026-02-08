@@ -110,13 +110,16 @@ export default function ClienteDetalle() {
         DNI: {cliente?.dni ?? "-"} · Tel: {cliente?.telefono ?? "-"} · Dirección: {cliente?.direccion ?? "-"}
       </p>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 10, margin: "16px 0" }}>
-        <Card title="Límite" value={estado ? Number(estado.limite_total).toFixed(2) : "-"} />
-        <Card title="Disponible" value={estado ? Number(estado.disponible).toFixed(2) : "-"} />
-        <Card title="Deuda" value={estado ? Number(estado.deuda_total).toFixed(2) : "-"} />
-        <Card title="Estado" value={st} />
-        <Card title="Mora +30" value={estado?.bloqueado_por_mora ? "Sí" : "No"} />
-      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 10, margin: "16px 0" }}>
+  <Card title="Límite" value={estado ? Number(estado.limite_total).toFixed(2) : "-"} />
+  <Card title="Disponible" value={estado ? Number(estado.disponible).toFixed(2) : "-"} />
+  <Card title="Deuda" value={estado ? Number(estado.deuda_total).toFixed(2) : "-"} />
+
+  <Card title="N° Vicred" value={cliente?.vicred_id ?? "-"} />
+
+  <Card title="Estado" value={st} />
+  <Card title="Mora +30" value={estado?.bloqueado_por_mora ? "Sí" : "No"} />
+</div>
 
       <section style={card}>
         <h3 style={{ marginTop: 0 }}>Facturas / Ventas</h3>
